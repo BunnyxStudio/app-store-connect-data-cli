@@ -60,6 +60,17 @@ Network behavior:
 
 ## Installation
 
+### Homebrew
+
+```bash
+brew tap BunnyxStudio/tap
+brew install adc
+```
+
+The current formula is published from the `homebrew-tap` repo and tracks a pinned source commit until the first tagged release.
+
+### Build from source
+
 ```bash
 git clone <your-repo-url> app-connect-data-cli
 cd app-connect-data-cli
