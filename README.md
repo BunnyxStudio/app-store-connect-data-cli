@@ -63,8 +63,7 @@ Network behavior:
 ### Homebrew
 
 ```bash
-brew tap BunnyxStudio/tap
-brew install adc
+brew install BunnyxStudio/tap/adc
 ```
 
 The formula is published from the `homebrew-tap` repo and tracks the latest tagged release.
@@ -72,9 +71,10 @@ The formula is published from the `homebrew-tap` repo and tracks the latest tagg
 ### Build from source
 
 ```bash
-git clone <your-repo-url> app-connect-data-cli
+git clone https://github.com/BunnyxStudio/app-connect-data-cli.git
 cd app-connect-data-cli
 swift build -c release
+mkdir -p ~/.local/bin
 install -m 755 ./.build/release/adc ~/.local/bin/adc
 ```
 
