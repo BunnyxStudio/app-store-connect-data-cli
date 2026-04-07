@@ -16,3 +16,4 @@
 - 新增 `--date` / `--from` / `--to` / `--range`
 - `query` 和 `reviews` 在有凭据时按需自动拉取数据
 - `sync` 降为高级预热入口
+- 许可证从 MIT 调整为 Apache-2.0，并新增 `NOTICE` 署名要求

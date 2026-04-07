@@ -237,4 +237,7 @@ swift test
 
 ## License
 
-MIT
+Licensed under the Apache License, Version 2.0.
+
+Forking, modification, redistribution, and commercial use are allowed.
+Redistributed or derivative versions must retain the license and the original project attribution in [NOTICE](./NOTICE).
