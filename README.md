@@ -67,7 +67,7 @@ brew tap BunnyxStudio/tap
 brew install adc
 ```
 
-The current formula is published from the `homebrew-tap` repo and tracks a pinned source commit until the first tagged release.
+The formula is published from the `homebrew-tap` repo and tracks the latest tagged release.
 
 ### Build from source
 
