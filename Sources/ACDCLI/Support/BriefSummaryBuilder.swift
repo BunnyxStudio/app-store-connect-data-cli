@@ -199,7 +199,7 @@ private enum BriefSummaryBuilderError: LocalizedError {
     }
 }
 
-struct BriefSummaryBuilder {
+struct BriefSummaryBuilder: @unchecked Sendable {
     let runtime: RuntimeContext
     let offline: Bool
     let refresh: Bool
@@ -227,7 +227,7 @@ struct BriefSummaryBuilder {
     private func build(resolved period: ResolvedBriefSummaryPeriod) async throws -> BriefSummaryReport {
         try await prefetch(period: period)
 
-        let salesOverview = try await executeQuery(
+        async let salesOverview = executeQuery(
             dataset: .sales,
             operation: .compare,
             time: period.currentSelection,
@@ -235,7 +235,7 @@ struct BriefSummaryBuilder {
             filters: QueryFilterSet(sourceReport: ["summary-sales"]),
             groupBy: []
         )
-        let reviewsOverview = try await executeQuery(
+        async let reviewsOverview = executeQuery(
             dataset: .reviews,
             operation: .compare,
             time: period.currentSelection,
@@ -243,9 +243,9 @@ struct BriefSummaryBuilder {
             filters: QueryFilterSet(),
             groupBy: []
         )
-        let financeOverview = try await loadFinanceOverview(period: period)
+        async let financeOverview = loadFinanceOverview(period: period)
 
-        let salesByTerritory = try await executeQuery(
+        async let salesByTerritory = executeQuery(
             dataset: .sales,
             operation: .compare,
             time: period.currentSelection,
@@ -253,7 +253,7 @@ struct BriefSummaryBuilder {
             filters: QueryFilterSet(sourceReport: ["summary-sales"]),
             groupBy: [.territory]
         )
-        let salesByDevice = try await executeQuery(
+        async let salesByDevice = executeQuery(
             dataset: .sales,
             operation: .compare,
             time: period.currentSelection,
@@ -261,7 +261,7 @@ struct BriefSummaryBuilder {
             filters: QueryFilterSet(sourceReport: ["summary-sales"]),
             groupBy: [.device]
         )
-        let salesByVersion = try await executeQuery(
+        async let salesByVersion = executeQuery(
             dataset: .sales,
             operation: .compare,
             time: period.currentSelection,
@@ -269,7 +269,7 @@ struct BriefSummaryBuilder {
             filters: QueryFilterSet(sourceReport: ["summary-sales"]),
             groupBy: [.version]
         )
-        let salesByCurrency = try await executeQuery(
+        async let salesByCurrency = executeQuery(
             dataset: .sales,
             operation: .compare,
             time: period.currentSelection,
@@ -277,7 +277,7 @@ struct BriefSummaryBuilder {
             filters: QueryFilterSet(sourceReport: ["summary-sales"]),
             groupBy: [.currency]
         )
-        let reviewsByRating = try await executeQuery(
+        async let reviewsByRating = executeQuery(
             dataset: .reviews,
             operation: .compare,
             time: period.currentSelection,
@@ -285,7 +285,7 @@ struct BriefSummaryBuilder {
             filters: QueryFilterSet(),
             groupBy: [.rating]
         )
-        let reviewsByTerritory = try await executeQuery(
+        async let reviewsByTerritory = executeQuery(
             dataset: .reviews,
             operation: .compare,
             time: period.currentSelection,
@@ -293,93 +293,117 @@ struct BriefSummaryBuilder {
             filters: QueryFilterSet(),
             groupBy: [.territory]
         )
-        let financeByTerritory = try await loadFinanceBreakdown(period: period, groupBy: .territory)
-        let financeByCurrency = try await loadFinanceBreakdown(period: period, groupBy: .currency)
+        async let financeByTerritory = loadFinanceBreakdown(period: period, groupBy: .territory)
+        async let financeByCurrency = loadFinanceBreakdown(period: period, groupBy: .currency)
 
-        let currentSummarySales = try await executeQuery(
+        async let currentSummarySales = executeQuery(
             dataset: .sales,
             operation: .records,
             time: period.currentSelection,
             compare: nil,
             filters: QueryFilterSet(sourceReport: ["summary-sales"]),
             groupBy: []
-        ).data.records
-        let previousSummarySales = try await executeQuery(
+        )
+        async let previousSummarySales = executeQuery(
             dataset: .sales,
             operation: .records,
             time: period.previousSelection,
             compare: nil,
             filters: QueryFilterSet(sourceReport: ["summary-sales"]),
             groupBy: []
-        ).data.records
+        )
 
-        let currentSubscriptions = try await executeQuery(
+        async let currentSubscriptions = executeQuery(
             dataset: .sales,
             operation: .records,
             time: period.currentSelection,
             compare: nil,
             filters: QueryFilterSet(sourceReport: ["subscription"]),
             groupBy: []
-        ).data.records
-        let previousSubscriptions = try await executeQuery(
+        )
+        async let previousSubscriptions = executeQuery(
             dataset: .sales,
             operation: .records,
             time: period.previousSelection,
             compare: nil,
             filters: QueryFilterSet(sourceReport: ["subscription"]),
             groupBy: []
-        ).data.records
+        )
 
-        let currentEvents = try await executeQuery(
+        async let currentEvents = executeQuery(
             dataset: .sales,
             operation: .records,
             time: period.currentSelection,
             compare: nil,
             filters: QueryFilterSet(sourceReport: ["subscription-event"]),
             groupBy: []
-        ).data.records
-        let previousEvents = try await executeQuery(
+        )
+        async let previousEvents = executeQuery(
             dataset: .sales,
             operation: .records,
             time: period.previousSelection,
             compare: nil,
             filters: QueryFilterSet(sourceReport: ["subscription-event"]),
             groupBy: []
-        ).data.records
+        )
 
-        let currentReviews = try await executeQuery(
+        async let currentReviews = executeQuery(
             dataset: .reviews,
             operation: .records,
             time: period.currentSelection,
             compare: nil,
             filters: QueryFilterSet(),
             groupBy: []
-        ).data.records
-        let previousReviews = try await executeQuery(
+        )
+        async let previousReviews = executeQuery(
             dataset: .reviews,
             operation: .records,
             time: period.previousSelection,
             compare: nil,
             filters: QueryFilterSet(),
             groupBy: []
-        ).data.records
+        )
 
-        let currentFinance = try await loadFinanceRecords(period: period)
+        async let currentFinance = loadFinanceRecords(period: period)
+
+        let resolvedSalesOverview = try await salesOverview
+        let resolvedReviewsOverview = try await reviewsOverview
+        let resolvedFinanceOverview = try await financeOverview
+        let resolvedSalesByTerritory = try await salesByTerritory
+        let resolvedSalesByDevice = try await salesByDevice
+        let resolvedSalesByVersion = try await salesByVersion
+        let resolvedSalesByCurrency = try await salesByCurrency
+        let resolvedReviewsByRating = try await reviewsByRating
+        let resolvedReviewsByTerritory = try await reviewsByTerritory
+        let resolvedFinanceByTerritory = try await financeByTerritory
+        let resolvedFinanceByCurrency = try await financeByCurrency
+        let resolvedCurrentSummarySales = try await currentSummarySales
+        let resolvedPreviousSummarySales = try await previousSummarySales
+        let resolvedCurrentSubscriptions = try await currentSubscriptions
+        let resolvedPreviousSubscriptions = try await previousSubscriptions
+        let resolvedCurrentEvents = try await currentEvents
+        let resolvedPreviousEvents = try await previousEvents
+        let resolvedCurrentReviews = try await currentReviews
+        let resolvedPreviousReviews = try await previousReviews
+        let resolvedCurrentFinance = try await currentFinance
 
         var sections: [BriefSummarySection] = []
 
         sections.append(
             makeOverviewSection(
                 period: period,
-                salesOverview: salesOverview,
-                reviewsOverview: reviewsOverview,
-                financeOverview: financeOverview,
-                currentSubscriptions: currentSubscriptions,
-                previousSubscriptions: previousSubscriptions
+                salesOverview: resolvedSalesOverview,
+                reviewsOverview: resolvedReviewsOverview,
+                financeOverview: resolvedFinanceOverview,
+                currentSubscriptions: resolvedCurrentSubscriptions.data.records,
+                previousSubscriptions: resolvedPreviousSubscriptions.data.records
             )
         )
 
-        if let section = makeTopProductsSection(current: currentSummarySales, previous: previousSummarySales) {
+        if let section = makeTopProductsSection(
+            current: resolvedCurrentSummarySales.data.records,
+            previous: resolvedPreviousSummarySales.data.records
+        ) {
             sections.append(section)
         }
 
@@ -387,7 +411,7 @@ struct BriefSummaryBuilder {
             makeComparisonSection(
                 title: "Sales by Territory",
                 note: nil,
-                result: salesByTerritory,
+                result: resolvedSalesByTerritory,
                 groupKey: "territory",
                 sortMetric: "proceeds",
                 columns: ["territory", "proceeds", "change", "units", "purchases", "installs"],
@@ -398,7 +422,7 @@ struct BriefSummaryBuilder {
             makeComparisonSection(
                 title: "Sales by Device",
                 note: nil,
-                result: salesByDevice,
+                result: resolvedSalesByDevice,
                 groupKey: "device",
                 sortMetric: "proceeds",
                 columns: ["device", "proceeds", "change", "units", "purchases", "installs"],
@@ -409,7 +433,7 @@ struct BriefSummaryBuilder {
             makeComparisonSection(
                 title: "Sales by Version",
                 note: nil,
-                result: salesByVersion,
+                result: resolvedSalesByVersion,
                 groupKey: "version",
                 sortMetric: "proceeds",
                 columns: ["version", "proceeds", "change", "units", "purchases", "installs"],
@@ -420,7 +444,7 @@ struct BriefSummaryBuilder {
             makeComparisonSection(
                 title: "Sales by Currency",
                 note: "Source currency rows are shown in \(reportingCurrency) after normalization.",
-                result: salesByCurrency,
+                result: resolvedSalesByCurrency,
                 groupKey: "currency",
                 sortMetric: "proceeds",
                 columns: ["currency", "proceeds", "change", "units", "purchases", "installs"],
@@ -428,14 +452,17 @@ struct BriefSummaryBuilder {
             )
         )
 
-        if let section = makePlanMixSection(current: currentSubscriptions, previous: previousSubscriptions) {
+        if let section = makePlanMixSection(
+            current: resolvedCurrentSubscriptions.data.records,
+            previous: resolvedPreviousSubscriptions.data.records
+        ) {
             sections.append(section)
         }
         if let section = makeSubscriptionSnapshotSection(
             title: "Subscriptions by Territory",
             note: "Latest subscription snapshot inside each range.",
-            current: currentSubscriptions,
-            previous: previousSubscriptions,
+            current: resolvedCurrentSubscriptions.data.records,
+            previous: resolvedPreviousSubscriptions.data.records,
             keyName: "territory"
         ) {
             sections.append(section)
@@ -443,17 +470,23 @@ struct BriefSummaryBuilder {
         if let section = makeSubscriptionSnapshotSection(
             title: "Subscriptions by Device",
             note: "Latest subscription snapshot inside each range.",
-            current: currentSubscriptions,
-            previous: previousSubscriptions,
+            current: resolvedCurrentSubscriptions.data.records,
+            previous: resolvedPreviousSubscriptions.data.records,
             keyName: "device"
         ) {
             sections.append(section)
         }
 
-        if let section = makeEventMixSection(current: currentEvents, previous: previousEvents) {
+        if let section = makeEventMixSection(
+            current: resolvedCurrentEvents.data.records,
+            previous: resolvedPreviousEvents.data.records
+        ) {
             sections.append(section)
         }
-        if let section = makeCancelReasonSection(current: currentEvents, previous: previousEvents) {
+        if let section = makeCancelReasonSection(
+            current: resolvedCurrentEvents.data.records,
+            previous: resolvedPreviousEvents.data.records
+        ) {
             sections.append(section)
         }
 
@@ -461,7 +494,7 @@ struct BriefSummaryBuilder {
             makeComparisonSection(
                 title: "Reviews by Rating",
                 note: nil,
-                result: reviewsByRating,
+                result: resolvedReviewsByRating,
                 groupKey: "rating",
                 sortMetric: "count",
                 columns: ["rating", "count", "change", "averageRating", "repliedRate"],
@@ -472,7 +505,7 @@ struct BriefSummaryBuilder {
             makeComparisonSection(
                 title: "Reviews by Territory",
                 note: nil,
-                result: reviewsByTerritory,
+                result: resolvedReviewsByTerritory,
                 groupKey: "territory",
                 sortMetric: "count",
                 columns: ["territory", "count", "change", "averageRating", "repliedRate"],
@@ -480,12 +513,12 @@ struct BriefSummaryBuilder {
             )
         )
 
-        if let financeByTerritory {
+        if let resolvedFinanceByTerritory {
             sections.append(
                 makeComparisonSection(
                     title: "Finance by Territory",
                     note: "Finance uses \(period.currentWindow.endDate.fiscalMonthString) vs \(period.previousWindow.endDate.fiscalMonthString).",
-                    result: financeByTerritory,
+                    result: resolvedFinanceByTerritory,
                     groupKey: "territory",
                     sortMetric: "proceeds",
                     columns: ["territory", "proceeds", "change", "amount", "units"],
@@ -493,12 +526,12 @@ struct BriefSummaryBuilder {
                 )
             )
         }
-        if let financeByCurrency {
+        if let resolvedFinanceByCurrency {
             sections.append(
                 makeComparisonSection(
                     title: "Finance by Currency",
                     note: "Finance uses \(period.currentWindow.endDate.fiscalMonthString) vs \(period.previousWindow.endDate.fiscalMonthString).",
-                    result: financeByCurrency,
+                    result: resolvedFinanceByCurrency,
                     groupKey: "currency",
                     sortMetric: "proceeds",
                     columns: ["currency", "proceeds", "change", "amount", "units"],
@@ -510,26 +543,26 @@ struct BriefSummaryBuilder {
         sections.append(
             makeDataHealthSection(
                 period: period,
-                currentSales: currentSummarySales,
-                currentSubscriptions: currentSubscriptions,
-                currentReviews: currentReviews,
-                previousReviews: previousReviews,
-                currentFinance: currentFinance
+                currentSales: resolvedCurrentSummarySales.data.records,
+                currentSubscriptions: resolvedCurrentSubscriptions.data.records,
+                currentReviews: resolvedCurrentReviews.data.records,
+                previousReviews: resolvedPreviousReviews.data.records,
+                currentFinance: resolvedCurrentFinance
             )
         )
 
         let warningSources = [
-            salesOverview,
-            reviewsOverview,
-            salesByTerritory,
-            salesByDevice,
-            salesByVersion,
-            salesByCurrency,
-            reviewsByRating,
-            reviewsByTerritory,
-            financeOverview,
-            financeByTerritory,
-            financeByCurrency
+            resolvedSalesOverview,
+            resolvedReviewsOverview,
+            resolvedSalesByTerritory,
+            resolvedSalesByDevice,
+            resolvedSalesByVersion,
+            resolvedSalesByCurrency,
+            resolvedReviewsByRating,
+            resolvedReviewsByTerritory,
+            resolvedFinanceOverview,
+            resolvedFinanceByTerritory,
+            resolvedFinanceByCurrency
         ]
         let warnings = deduplicatedWarnings(
             warningSources.compactMap { $0 }.flatMap { $0.warnings }
@@ -704,7 +737,8 @@ struct BriefSummaryBuilder {
                 groupBy: groupBy
             ),
             offline: queryShouldUseOffline(dataset: dataset),
-            refresh: false
+            refresh: false,
+            skipSync: true
         )
     }
 

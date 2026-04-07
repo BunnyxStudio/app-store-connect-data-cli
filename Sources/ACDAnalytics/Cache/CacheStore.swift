@@ -59,7 +59,7 @@ public struct CachedReviewsPayload: Codable, Sendable {
     }
 }
 
-public final class CacheStore {
+public final class CacheStore: @unchecked Sendable {
     private let fileManager: FileManager
     public let rootDirectory: URL
 
@@ -98,28 +98,42 @@ public final class CacheStore {
 
     @discardableResult
     public func record(report: DownloadedReport, fetchedAt: Date = Date()) throws -> CachedReportRecord {
+        try record(reports: [report], fetchedAt: fetchedAt)[0]
+    }
+
+    @discardableResult
+    public func record(reports: [DownloadedReport], fetchedAt: Date = Date()) throws -> [CachedReportRecord] {
+        guard reports.isEmpty == false else { return [] }
         try prepare()
-        let id = [
-            report.source.rawValue,
-            report.reportType,
-            report.reportSubType,
-            report.reportDateKey,
-            report.queryHash
-        ].joined(separator: "|")
-        let record = CachedReportRecord(
-            id: id,
-            source: report.source,
-            reportType: report.reportType,
-            reportSubType: report.reportSubType,
-            reportDateKey: report.reportDateKey,
-            vendorNumber: report.vendorNumber,
-            queryHash: report.queryHash,
-            filePath: report.fileURL.path,
-            fetchedAt: fetchedAt
-        )
         var manifest = try loadManifest()
-        manifest.removeAll { $0.id == record.id }
-        manifest.append(record)
+        var byID = Dictionary(uniqueKeysWithValues: manifest.map { ($0.id, $0) })
+        var recorded: [CachedReportRecord] = []
+        recorded.reserveCapacity(reports.count)
+
+        for report in reports {
+            let id = [
+                report.source.rawValue,
+                report.reportType,
+                report.reportSubType,
+                report.reportDateKey,
+                report.queryHash
+            ].joined(separator: "|")
+            let record = CachedReportRecord(
+                id: id,
+                source: report.source,
+                reportType: report.reportType,
+                reportSubType: report.reportSubType,
+                reportDateKey: report.reportDateKey,
+                vendorNumber: report.vendorNumber,
+                queryHash: report.queryHash,
+                filePath: report.fileURL.path,
+                fetchedAt: fetchedAt
+            )
+            byID[record.id] = record
+            recorded.append(record)
+        }
+
+        manifest = Array(byID.values)
         manifest.sort { lhs, rhs in
             if lhs.source == rhs.source {
                 return lhs.reportDateKey < rhs.reportDateKey
@@ -127,7 +141,7 @@ public final class CacheStore {
             return lhs.source.rawValue < rhs.source.rawValue
         }
         try saveManifest(manifest)
-        return record
+        return recorded
     }
 
     public func loadManifest() throws -> [CachedReportRecord] {

@@ -48,7 +48,7 @@ struct CredentialsOverrides {
     var p8Path: String?
 }
 
-struct RuntimeContext {
+struct RuntimeContext: @unchecked Sendable {
     var config: ACDConfig
     var credentials: Credentials?
     var paths: RuntimePaths

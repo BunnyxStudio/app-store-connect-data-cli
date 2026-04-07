@@ -26,6 +26,7 @@ public struct SyncSummary: Codable, Sendable {
 }
 
 public final class SyncService {
+    private let maxConcurrentFetches = 3
     private let cacheStore: CacheStore
     private let downloader: ReportDownloader
     private let client: ASCClient
@@ -45,18 +46,24 @@ public final class SyncService {
         monthlyFiscalMonths: [String],
         force: Bool
     ) async throws -> SyncSummary {
-        var records: [CachedReportRecord] = []
+        let downloader = self.downloader
         let policy: ReportCachePolicy = force ? .reloadIgnoringCache : .useCached
+        var operations: [@Sendable () async throws -> DownloadedReport] = []
+        operations.reserveCapacity(dates.count + monthlyFiscalMonths.count)
+
         for date in dates {
-            try await appendIfAvailable(&records) {
+            operations.append {
                 try await downloader.fetchSalesDaily(datePT: date, cachePolicy: policy)
             }
         }
         for fiscalMonth in monthlyFiscalMonths {
-            try await appendIfAvailable(&records) {
+            operations.append {
                 try await downloader.fetchSalesMonthly(fiscalMonth: fiscalMonth, cachePolicy: policy)
             }
         }
+
+        let reports = try await loadAvailableReports(operations)
+        let records = try cacheStore.record(reports: reports)
         return SyncSummary(records: records)
     }
 
@@ -77,6 +84,7 @@ public final class SyncService {
         force: Bool
     ) async throws -> SyncSummary {
         let requested = reportFamilies.isEmpty ? [SalesReportFamily.summarySales] : reportFamilies
+        let downloader = self.downloader
         let policy: ReportCachePolicy = force ? .reloadIgnoringCache : .useCached
         var records: [CachedReportRecord] = []
 
@@ -86,34 +94,38 @@ public final class SyncService {
         }
 
         let dates = ptDates(in: window)
+        var operations: [@Sendable () async throws -> DownloadedReport] = []
+        operations.reserveCapacity(dates.count * requested.count)
         for date in dates {
             if requested.contains(.subscription) {
-                try await appendIfAvailable(&records) {
+                operations.append {
                     try await downloader.fetchSubscriptionDaily(datePT: date, cachePolicy: policy)
                 }
             }
             if requested.contains(.subscriptionEvent) {
-                try await appendIfAvailable(&records) {
+                operations.append {
                     try await downloader.fetchSubscriptionEventDaily(datePT: date, cachePolicy: policy)
                 }
             }
             if requested.contains(.subscriber) {
-                try await appendIfAvailable(&records) {
+                operations.append {
                     try await downloader.fetchSubscriberDaily(datePT: date, cachePolicy: policy)
                 }
             }
             if requested.contains(.preOrder) {
-                try await appendIfAvailable(&records) {
+                operations.append {
                     try await downloader.fetchPreOrderDaily(datePT: date, cachePolicy: policy)
                 }
             }
             if requested.contains(.subscriptionOfferRedemption) {
-                try await appendIfAvailable(&records) {
+                operations.append {
                     try await downloader.fetchSubscriptionOfferCodeRedemptionDaily(datePT: date, cachePolicy: policy)
                 }
             }
         }
 
+        let reports = try await loadAvailableReports(operations)
+        records.append(contentsOf: try cacheStore.record(reports: reports))
         return SyncSummary(records: records)
     }
 
@@ -121,19 +133,24 @@ public final class SyncService {
         dates: [Date],
         force: Bool
     ) async throws -> SyncSummary {
-        var records: [CachedReportRecord] = []
+        let downloader = self.downloader
         let policy: ReportCachePolicy = force ? .reloadIgnoringCache : .useCached
+        var operations: [@Sendable () async throws -> DownloadedReport] = []
+        operations.reserveCapacity(dates.count * 3)
         for date in dates {
-            try await appendIfAvailable(&records) {
+            operations.append {
                 try await downloader.fetchSubscriptionDaily(datePT: date, cachePolicy: policy)
             }
-            try await appendIfAvailable(&records) {
+            operations.append {
                 try await downloader.fetchSubscriptionEventDaily(datePT: date, cachePolicy: policy)
             }
-            try await appendIfAvailable(&records) {
+            operations.append {
                 try await downloader.fetchSubscriberDaily(datePT: date, cachePolicy: policy)
             }
         }
+
+        let reports = try await loadAvailableReports(operations)
+        let records = try cacheStore.record(reports: reports)
         return SyncSummary(records: records)
     }
 
@@ -150,12 +167,14 @@ public final class SyncService {
         reportTypes: [FinanceReportType],
         force: Bool
     ) async throws -> SyncSummary {
-        var records: [CachedReportRecord] = []
+        let downloader = self.downloader
         let policy: ReportCachePolicy = force ? .reloadIgnoringCache : .useCached
+        var operations: [@Sendable () async throws -> DownloadedReport] = []
+        operations.reserveCapacity(fiscalMonths.count * regionCodes.count * reportTypes.count)
         for fiscalMonth in fiscalMonths {
             for reportType in reportTypes {
                 for regionCode in regionCodes {
-                    try await appendIfAvailable(&records) {
+                    operations.append {
                         try await downloader.fetchFinanceMonth(
                             fiscalMonth: fiscalMonth,
                             reportType: reportType,
@@ -166,6 +185,9 @@ public final class SyncService {
                 }
             }
         }
+
+        let reports = try await loadAvailableReports(operations)
+        let records = try cacheStore.record(reports: reports)
         return SyncSummary(records: records)
     }
 
@@ -201,14 +223,44 @@ public final class SyncService {
         return SyncSummary(records: [], reviewCount: reviews.count)
     }
 
-    private func appendIfAvailable(
-        _ records: inout [CachedReportRecord],
-        load: () async throws -> DownloadedReport
-    ) async throws {
+    private func loadAvailableReports(
+        _ operations: [@Sendable () async throws -> DownloadedReport]
+    ) async throws -> [DownloadedReport] {
+        guard operations.isEmpty == false else { return [] }
+
+        return try await withThrowingTaskGroup(of: DownloadedReport?.self) { group in
+            var iterator = operations.makeIterator()
+            var reports: [DownloadedReport] = []
+
+            for _ in 0..<min(maxConcurrentFetches, operations.count) {
+                guard let operation = iterator.next() else { break }
+                group.addTask {
+                    try await Self.loadAvailableReport(operation)
+                }
+            }
+
+            while let report = try await group.next() {
+                if let report {
+                    reports.append(report)
+                }
+                if let next = iterator.next() {
+                    group.addTask {
+                        try await Self.loadAvailableReport(next)
+                    }
+                }
+            }
+
+            return reports
+        }
+    }
+
+    private static func loadAvailableReport(
+        _ load: @Sendable () async throws -> DownloadedReport
+    ) async throws -> DownloadedReport? {
         do {
-            let report = try await load()
-            records.append(try cacheStore.record(report: report))
+            return try await load()
         } catch ASCClientError.reportNotAvailableYet {
+            return nil
         }
     }
 }

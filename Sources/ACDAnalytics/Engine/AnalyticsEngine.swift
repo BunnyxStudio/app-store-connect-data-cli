@@ -28,7 +28,7 @@ public enum AnalyticsEngineError: LocalizedError {
     }
 }
 
-public final class AnalyticsEngine {
+public final class AnalyticsEngine: @unchecked Sendable {
     private let cacheStore: CacheStore
     private let parser: ReportParser
     private let syncService: SyncService?
@@ -136,17 +136,18 @@ public final class AnalyticsEngine {
     public func execute(
         spec: DataQuerySpec,
         offline: Bool = false,
-        refresh: Bool = false
+        refresh: Bool = false,
+        skipSync: Bool = false
     ) async throws -> QueryResult {
         switch spec.dataset {
         case .sales:
-            return try await executeSales(spec: spec, offline: offline, refresh: refresh)
+            return try await executeSales(spec: spec, offline: offline, refresh: refresh, skipSync: skipSync)
         case .reviews:
-            return try await executeReviews(spec: spec, offline: offline, refresh: refresh)
+            return try await executeReviews(spec: spec, offline: offline, refresh: refresh, skipSync: skipSync)
         case .finance:
-            return try await executeFinance(spec: spec, offline: offline, refresh: refresh)
+            return try await executeFinance(spec: spec, offline: offline, refresh: refresh, skipSync: skipSync)
         case .analytics:
-            return try await executeAnalytics(spec: spec, offline: offline, refresh: refresh)
+            return try await executeAnalytics(spec: spec, offline: offline, refresh: refresh, skipSync: skipSync)
         case .brief:
             throw AnalyticsEngineError.invalidQuery("Brief summaries are handled by adc brief, adc overview, or adc query run --spec.")
         }
@@ -155,11 +156,12 @@ public final class AnalyticsEngine {
     private func executeSales(
         spec: DataQuerySpec,
         offline: Bool,
-        refresh: Bool
+        refresh: Bool,
+        skipSync: Bool
     ) async throws -> QueryResult {
         let selection = try resolveSelection(dataset: .sales, time: spec.time, defaultPreset: .last7d)
         let requestedReports = normalizedSalesFamilies(filters: spec.filters)
-        if offline == false, let syncService {
+        if offline == false, skipSync == false, let syncService {
             _ = try await syncService.syncSalesReports(window: selection.window, reportFamilies: requestedReports, force: refresh)
         }
         let records = try loadSalesRecords(window: selection.window, filters: spec.filters, requestedReports: requestedReports)
@@ -176,12 +178,13 @@ public final class AnalyticsEngine {
     private func executeReviews(
         spec: DataQuerySpec,
         offline: Bool,
-        refresh: Bool
+        refresh: Bool,
+        skipSync: Bool
     ) async throws -> QueryResult {
         if spec.filters.version.isEmpty == false {
             throw AnalyticsEngineError.unsupportedFilter("Reviews do not support version filtering because Apple does not expose review app versions.")
         }
-        if offline == false, let syncService {
+        if offline == false, skipSync == false, let syncService {
             let query = ASCCustomerReviewQuery(sort: .newest)
             _ = try await syncService.syncReviews(
                 maxApps: nil,
@@ -205,10 +208,11 @@ public final class AnalyticsEngine {
     private func executeFinance(
         spec: DataQuerySpec,
         offline: Bool,
-        refresh: Bool
+        refresh: Bool,
+        skipSync: Bool
     ) async throws -> QueryResult {
         let selection = try resolveSelection(dataset: .finance, time: spec.time, defaultPreset: .lastMonth)
-        if offline == false, let syncService {
+        if offline == false, skipSync == false, let syncService {
             _ = try await syncService.syncFinance(
                 fiscalMonths: selection.fiscalMonths,
                 regionCodes: ["ZZ", "Z1"],
@@ -231,11 +235,12 @@ public final class AnalyticsEngine {
     private func executeAnalytics(
         spec: DataQuerySpec,
         offline: Bool,
-        refresh: Bool
+        refresh: Bool,
+        skipSync: Bool
     ) async throws -> QueryResult {
         let selection = try resolveSelection(dataset: .analytics, time: spec.time, defaultPreset: .last7d)
         let reportDescriptors = normalizedAnalyticsReports(filters: spec.filters)
-        let warnings = try await ensureAnalyticsData(
+        let warnings = skipSync ? [] : try await ensureAnalyticsData(
             selection: selection,
             filters: spec.filters,
             descriptors: reportDescriptors,

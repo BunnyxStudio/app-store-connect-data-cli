@@ -186,7 +186,7 @@ public struct ASCCustomerReviewQuery: Sendable {
     }
 }
 
-public final class ASCClient: ASCClientProtocol {
+public final class ASCClient: ASCClientProtocol, @unchecked Sendable {
     private let session: URLSession
     private let tokenProvider: () throws -> String
     private let baseURL = URL(string: "https://api.appstoreconnect.apple.com")!
@@ -194,6 +194,7 @@ public final class ASCClient: ASCClientProtocol {
     private let iTunesHistogramUserAgent = "iTunes/12.6.5 (Macintosh; OS X 10.13.4) AppleWebKit/604.5.6.1.1"
     private let iTunesHistogramMinimumRatings = 5
     private let iTunesRetryAttempts = 3
+    private let maxConcurrentReviewAppFetches = 3
     private let maxRetryAttempts = 3
     private let requestTimeout: TimeInterval = 25
     private let retryBaseDelay: TimeInterval = 0.8
@@ -501,10 +502,23 @@ public final class ASCClient: ASCClientProtocol {
         while start < countries.count {
             let end = min(start + max(1, workerCount), countries.count)
             let chunk = countries[start..<end]
-            for country in chunk {
-                if let rating = await fetchStorefrontRating(appID: appID, countryCode: country) {
-                    byCountry[rating.countryCode] = rating
+            let chunkRatings = await withTaskGroup(of: ITunesStorefrontRating?.self) { group in
+                for country in chunk {
+                    group.addTask {
+                        await self.fetchStorefrontRating(appID: appID, countryCode: country)
+                    }
                 }
+
+                var ratings: [ITunesStorefrontRating] = []
+                for await rating in group {
+                    if let rating {
+                        ratings.append(rating)
+                    }
+                }
+                return ratings
+            }
+            for rating in chunkRatings {
+                byCountry[rating.countryCode] = rating
             }
             start = end
         }
@@ -783,112 +797,50 @@ public final class ASCClient: ASCClientProtocol {
         var merged: [ASCLatestReview] = []
         var firstFailure: Error?
 
-        for app in apps {
-            do {
-                var reviewItems = [
-                    URLQueryItem(name: "sort", value: query.sort.apiValue),
-                    URLQueryItem(name: "limit", value: "\(cappedPageLimit)"),
-                    URLQueryItem(
-                        name: "fields[customerReviews]",
-                        value: "rating,title,body,reviewerNickname,territory,createdDate,response"
-                    ),
-                    URLQueryItem(name: "include", value: "response"),
-                    URLQueryItem(
-                        name: "fields[customerReviewResponses]",
-                        value: "responseBody,lastModifiedDate,state"
-                    )
-                ]
-                if normalizedRatings.isEmpty == false {
-                    let raw = normalizedRatings.map(String.init).joined(separator: ",")
-                    reviewItems.append(URLQueryItem(name: "filter[rating]", value: raw))
-                }
-                if let normalizedTerritory {
-                    reviewItems.append(URLQueryItem(name: "filter[territory]", value: normalizedTerritory))
-                }
-                if let hasPublishedResponse = query.hasPublishedResponse {
-                    reviewItems.append(
-                        URLQueryItem(
-                            name: "exists[publishedResponse]",
-                            value: hasPublishedResponse ? "true" : "false"
+        await withTaskGroup(of: Result<[ASCLatestReview], Error>.self) { group in
+            var iterator = apps.makeIterator()
+
+            func enqueueNextIfNeeded() {
+                guard let app = iterator.next() else { return }
+                group.addTask {
+                    do {
+                        return .success(
+                            try await self.fetchReviewsForApp(
+                                app,
+                                sortValue: query.sort.apiValue,
+                                pageLimit: cappedPageLimit,
+                                perAppLimit: normalizedPerAppLimit,
+                                normalizedRatings: normalizedRatings,
+                                normalizedTerritory: normalizedTerritory,
+                                hasPublishedResponse: query.hasPublishedResponse
+                            )
                         )
-                    )
-                }
-                guard let firstPageURL = makeURL(path: "/v1/apps/\(app.id)/customerReviews", queryItems: reviewItems) else {
-                    throw ASCClientError.invalidURL
-                }
-
-                var fetchedForApp = 0
-                var pageURL: URL? = firstPageURL
-                var visitedPageURLs: Set<String> = []
-
-                while let currentPageURL = pageURL {
-                    if visitedPageURLs.insert(currentPageURL.absoluteString).inserted == false {
-                        break
+                    } catch {
+                        return .failure(error)
                     }
-
-                    let reviewData = try await request(url: currentPageURL)
-                    let reviewResponse = try decoder.decode(
-                        ASCCollectionResponse<ASCCustomerReviewResource>.self,
-                        from: reviewData
-                    )
-                    let responsesByID = buildReviewResponseMap(included: reviewResponse.included)
-                    var mapped = reviewResponse.data.compactMap { review -> ASCLatestReview? in
-                        guard let attributes = review.attributes else { return nil }
-                        guard let createdDate = parseASCDate(attributes.createdDate) else { return nil }
-                        let rating = min(max(attributes.rating ?? 0, 0), 5)
-                        guard rating > 0 else { return nil }
-                        let responseID = review.relationships?.response?.data?.id
-                        let developerResponse = responseID.flatMap { responsesByID[$0] }
-                        return ASCLatestReview(
-                            id: review.id,
-                            appID: app.id,
-                            appName: app.name,
-                            bundleID: app.bundleID,
-                            rating: rating,
-                            title: normalize(attributes.title) ?? "",
-                            body: normalize(attributes.body) ?? "",
-                            reviewerNickname: normalize(attributes.reviewerNickname) ?? "Anonymous",
-                            territory: normalize(attributes.territory),
-                            createdDate: createdDate,
-                            developerResponse: developerResponse
-                        )
-                    }
-
-                    if let perAppCap = normalizedPerAppLimit {
-                        let remaining = perAppCap - fetchedForApp
-                        if remaining <= 0 {
-                            break
-                        }
-                        if mapped.count > remaining {
-                            mapped = Array(mapped.prefix(remaining))
-                        }
-                    }
-
-                    fetchedForApp += mapped.count
-                    merged.append(contentsOf: mapped)
-
-                    if let totalCap = normalizedTotalLimit, merged.count >= totalCap {
-                        break
-                    }
-                    if let perAppCap = normalizedPerAppLimit, fetchedForApp >= perAppCap {
-                        break
-                    }
-
-                    if let nextLink = normalize(reviewResponse.links?.next),
-                       let nextPageURL = URL(string: nextLink, relativeTo: baseURL)?.absoluteURL {
-                        pageURL = nextPageURL
-                    } else {
-                        pageURL = nil
-                    }
-                }
-            } catch {
-                if firstFailure == nil {
-                    firstFailure = error
                 }
             }
 
-            if let totalCap = normalizedTotalLimit, merged.count >= totalCap {
-                break
+            for _ in 0..<min(maxConcurrentReviewAppFetches, apps.count) {
+                enqueueNextIfNeeded()
+            }
+
+            while let result = await group.next() {
+                switch result {
+                case .success(let reviews):
+                    merged.append(contentsOf: reviews)
+                case .failure(let error):
+                    if firstFailure == nil {
+                        firstFailure = error
+                    }
+                }
+
+                if let totalCap = normalizedTotalLimit, merged.count >= totalCap {
+                    group.cancelAll()
+                    continue
+                }
+
+                enqueueNextIfNeeded()
             }
         }
 
@@ -901,6 +853,114 @@ public final class ASCClient: ASCClientProtocol {
             return Array(merged.prefix(totalCap))
         }
         return merged
+    }
+
+    private func fetchReviewsForApp(
+        _ app: ASCResolvedApp,
+        sortValue: String,
+        pageLimit: Int,
+        perAppLimit: Int?,
+        normalizedRatings: [Int],
+        normalizedTerritory: String?,
+        hasPublishedResponse: Bool?
+    ) async throws -> [ASCLatestReview] {
+        var reviewItems = [
+            URLQueryItem(name: "sort", value: sortValue),
+            URLQueryItem(name: "limit", value: "\(pageLimit)"),
+            URLQueryItem(
+                name: "fields[customerReviews]",
+                value: "rating,title,body,reviewerNickname,territory,createdDate,response"
+            ),
+            URLQueryItem(name: "include", value: "response"),
+            URLQueryItem(
+                name: "fields[customerReviewResponses]",
+                value: "responseBody,lastModifiedDate,state"
+            )
+        ]
+        if normalizedRatings.isEmpty == false {
+            let raw = normalizedRatings.map(String.init).joined(separator: ",")
+            reviewItems.append(URLQueryItem(name: "filter[rating]", value: raw))
+        }
+        if let normalizedTerritory {
+            reviewItems.append(URLQueryItem(name: "filter[territory]", value: normalizedTerritory))
+        }
+        if let hasPublishedResponse {
+            reviewItems.append(
+                URLQueryItem(
+                    name: "exists[publishedResponse]",
+                    value: hasPublishedResponse ? "true" : "false"
+                )
+            )
+        }
+        guard let firstPageURL = makeURL(path: "/v1/apps/\(app.id)/customerReviews", queryItems: reviewItems) else {
+            throw ASCClientError.invalidURL
+        }
+
+        var fetchedForApp = 0
+        var collected: [ASCLatestReview] = []
+        var pageURL: URL? = firstPageURL
+        var visitedPageURLs: Set<String> = []
+
+        while let currentPageURL = pageURL {
+            try Task.checkCancellation()
+            if visitedPageURLs.insert(currentPageURL.absoluteString).inserted == false {
+                break
+            }
+
+            let reviewData = try await request(url: currentPageURL)
+            let reviewResponse = try JSONDecoder().decode(
+                ASCCollectionResponse<ASCCustomerReviewResource>.self,
+                from: reviewData
+            )
+            let responsesByID = buildReviewResponseMap(included: reviewResponse.included)
+            var mapped = reviewResponse.data.compactMap { review -> ASCLatestReview? in
+                guard let attributes = review.attributes else { return nil }
+                guard let createdDate = parseASCDate(attributes.createdDate) else { return nil }
+                let rating = min(max(attributes.rating ?? 0, 0), 5)
+                guard rating > 0 else { return nil }
+                let responseID = review.relationships?.response?.data?.id
+                let developerResponse = responseID.flatMap { responsesByID[$0] }
+                return ASCLatestReview(
+                    id: review.id,
+                    appID: app.id,
+                    appName: app.name,
+                    bundleID: app.bundleID,
+                    rating: rating,
+                    title: normalize(attributes.title) ?? "",
+                    body: normalize(attributes.body) ?? "",
+                    reviewerNickname: normalize(attributes.reviewerNickname) ?? "Anonymous",
+                    territory: normalize(attributes.territory),
+                    createdDate: createdDate,
+                    developerResponse: developerResponse
+                )
+            }
+
+            if let perAppCap = perAppLimit {
+                let remaining = perAppCap - fetchedForApp
+                if remaining <= 0 {
+                    break
+                }
+                if mapped.count > remaining {
+                    mapped = Array(mapped.prefix(remaining))
+                }
+            }
+
+            fetchedForApp += mapped.count
+            collected.append(contentsOf: mapped)
+
+            if let perAppCap = perAppLimit, fetchedForApp >= perAppCap {
+                break
+            }
+
+            if let nextLink = normalize(reviewResponse.links?.next),
+               let nextPageURL = URL(string: nextLink, relativeTo: baseURL)?.absoluteURL {
+                pageURL = nextPageURL
+            } else {
+                pageURL = nil
+            }
+        }
+
+        return collected
     }
 
     public func createOrUpdateCustomerReviewResponse(

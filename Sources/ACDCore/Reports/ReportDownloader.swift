@@ -27,7 +27,7 @@ public enum ReportDownloaderError: Error {
     case decompressionFailed
 }
 
-public final class ReportDownloader: ReportDownloaderProtocol {
+public final class ReportDownloader: ReportDownloaderProtocol, @unchecked Sendable {
     private let fileManager: FileManager
     private let client: ASCClientProtocol
     private let credentialsProvider: () throws -> Credentials
