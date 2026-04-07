@@ -84,6 +84,10 @@ public final class CacheStore {
         rootDirectory.appendingPathComponent("manifest.json")
     }
 
+    public var fxRatesURL: URL {
+        rootDirectory.appendingPathComponent("fx-rates.json")
+    }
+
     public func prepare() throws {
         // CacheStore only persists downloaded reports and reviews.
         // Credentials and .p8 contents are never written here.

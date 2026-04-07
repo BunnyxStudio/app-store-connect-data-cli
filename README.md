@@ -12,7 +12,8 @@ The command name is `adc`.
 
 - Query Apple sales, finance, reviews, and analytics data directly by date, range, year, or fiscal month
 - Aggregate and compare periods with stable JSON output
-- Generate weekly and monthly briefs
+- Normalize monetary metrics into a configurable reporting currency such as `USD` or `CNY`
+- Generate multi-table daily, weekly, and monthly briefs
 - Render the same result as `json`, `table`, or `markdown`
 - Accept a canonical JSON spec through `query run --spec`
 
@@ -67,8 +68,17 @@ Example:
   "issuerID": "YOUR_ISSUER_ID",
   "keyID": "YOUR_KEY_ID",
   "vendorNumber": "YOUR_VENDOR_NUMBER",
-  "p8Path": "/absolute/path/AuthKey_XXXXXX.p8"
+  "p8Path": "/absolute/path/AuthKey_XXXXXX.p8",
+  "reportingCurrency": "USD"
 }
+```
+
+Set the default reporting currency:
+
+```bash
+adc config currency show
+adc config currency set CNY
+adc config currency set USD --local
 ```
 
 Resolution order:
@@ -79,9 +89,11 @@ Resolution order:
 
 ```bash
 ./.build/release/adc auth validate --output table
+./.build/release/adc config currency show --output table
 ./.build/release/adc capabilities list --output table
 ./.build/release/adc sales records --range last-week --output json
 ./.build/release/adc reviews aggregate --range last-week --group-by territory --output table
+./.build/release/adc brief daily
 ./.build/release/adc brief weekly --output markdown
 ```
 
@@ -89,6 +101,8 @@ Resolution order:
 
 ```bash
 adc auth validate
+adc config currency show
+adc config currency set CNY
 adc capabilities list
 
 adc sales records --range last-week
@@ -107,11 +121,29 @@ adc analytics records --range last-week --source-report usage
 adc analytics aggregate --range last-week --source-report acquisition --group-by app
 adc analytics compare --range last-week --source-report performance --compare previous-period
 
+adc brief daily
 adc brief weekly
 adc brief monthly
 adc query run --spec -
 adc cache clear
 ```
+
+## Brief summaries
+
+`brief` defaults to `table` output and renders separate tables for overview, breakdowns, subscriptions, reviews, and data health.
+
+- `adc brief daily`
+  - Current: `last-day`
+  - Compare: `previous-day`
+- `adc brief weekly`
+  - Current: `last-week`
+  - Compare: `previous-week`
+- `adc brief monthly`
+  - Current: `last-month`
+  - Compare: `previous-month`
+  - Includes finance reconcile tables
+
+Monetary metrics are normalized to the configured reporting currency. Raw mixed-currency totals are not shown in CLI outputs.
 
 ## Time selection
 
@@ -180,6 +212,7 @@ Cached content includes:
 ```bash
 swift build
 swift test
+./scripts/full_cli_smoke.sh
 ./.build/debug/adc --help
 ```
 

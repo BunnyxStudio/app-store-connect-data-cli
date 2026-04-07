@@ -111,6 +111,7 @@ public struct QueryFilterSet: Codable, Equatable, Sendable {
     public var app: [String]
     public var version: [String]
     public var territory: [String]
+    public var currency: [String]
     public var device: [String]
     public var sku: [String]
     public var subscription: [String]
@@ -123,6 +124,7 @@ public struct QueryFilterSet: Codable, Equatable, Sendable {
         app: [String] = [],
         version: [String] = [],
         territory: [String] = [],
+        currency: [String] = [],
         device: [String] = [],
         sku: [String] = [],
         subscription: [String] = [],
@@ -134,6 +136,7 @@ public struct QueryFilterSet: Codable, Equatable, Sendable {
         self.app = app
         self.version = version
         self.territory = territory
+        self.currency = currency
         self.device = device
         self.sku = sku
         self.subscription = subscription
@@ -147,6 +150,7 @@ public struct QueryFilterSet: Codable, Equatable, Sendable {
         case app
         case version
         case territory
+        case currency
         case device
         case sku
         case subscription
@@ -162,6 +166,7 @@ public struct QueryFilterSet: Codable, Equatable, Sendable {
             app: try container.decodeIfPresent([String].self, forKey: .app) ?? [],
             version: try container.decodeIfPresent([String].self, forKey: .version) ?? [],
             territory: try container.decodeIfPresent([String].self, forKey: .territory) ?? [],
+            currency: try container.decodeIfPresent([String].self, forKey: .currency) ?? [],
             device: try container.decodeIfPresent([String].self, forKey: .device) ?? [],
             sku: try container.decodeIfPresent([String].self, forKey: .sku) ?? [],
             subscription: try container.decodeIfPresent([String].self, forKey: .subscription) ?? [],

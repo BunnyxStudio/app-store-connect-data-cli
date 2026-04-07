@@ -15,6 +15,7 @@ The CLI loads credentials in this order:
 - `ASC_KEY_ID`
 - `ASC_VENDOR_NUMBER`
 - `ASC_P8_PATH`
+- `ADC_REPORTING_CURRENCY`
 
 ## Local paths
 
@@ -44,3 +45,6 @@ Analytics report downloads are stored locally as Apple returns them.
 - `--offline` reads local cache only
 - `--refresh` re-fetches raw data from Apple
 - `cache clear` removes local cache only
+- `config currency show` prints the effective reporting currency
+- `config currency set <CODE>` saves a default reporting currency to user config
+- `config currency set <CODE> --local` saves a repo-local override

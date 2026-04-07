@@ -34,19 +34,26 @@ public final class AnalyticsEngine {
     private let syncService: SyncService?
     private let client: ASCClient?
     private let downloader: ReportDownloader?
+    private let fxService: FXRateService
+    private let reportingCurrency: String
 
     public init(
         cacheStore: CacheStore,
         parser: ReportParser = ReportParser(),
         syncService: SyncService? = nil,
         client: ASCClient? = nil,
-        downloader: ReportDownloader? = nil
+        downloader: ReportDownloader? = nil,
+        fxService: FXRateService? = nil,
+        reportingCurrency: String = "USD"
     ) {
         self.cacheStore = cacheStore
         self.parser = parser
         self.syncService = syncService
         self.client = client
         self.downloader = downloader
+        self.fxService = fxService ?? FXRateService(cacheURL: cacheStore.fxRatesURL)
+        let normalizedReportingCurrency = reportingCurrency.normalizedCurrencyCode
+        self.reportingCurrency = normalizedReportingCurrency.isUnknownCurrencyCode ? "USD" : normalizedReportingCurrency
     }
 
     public func capabilities() -> [CapabilityDescriptor] {
@@ -156,12 +163,13 @@ public final class AnalyticsEngine {
             try await syncService.syncSalesReports(window: selection.window, reportFamilies: requestedReports, force: refresh)
         }
         let records = try loadSalesRecords(window: selection.window, filters: spec.filters, requestedReports: requestedReports)
-        return try buildResult(
+        return try await buildResult(
             dataset: .sales,
             spec: spec,
             selection: selection,
             source: requestedReports.map(\.rawValue),
-            records: records
+            records: records,
+            allowFXNetwork: offline == false
         )
     }
 
@@ -184,12 +192,13 @@ public final class AnalyticsEngine {
         }
         let selection = try resolveSelection(dataset: .reviews, time: spec.time, defaultPreset: .last7d)
         let records = try loadReviewRecords(window: selection.window, filters: spec.filters)
-        return try buildResult(
+        return try await buildResult(
             dataset: .reviews,
             spec: spec,
             selection: selection,
             source: ["customer-reviews"],
-            records: records
+            records: records,
+            allowFXNetwork: false
         )
     }
 
@@ -209,12 +218,13 @@ public final class AnalyticsEngine {
         }
         let records = try loadFinanceRecords(fiscalMonths: selection.fiscalMonths, filters: spec.filters)
         let source = spec.filters.sourceReport.isEmpty ? ["financial", "finance-detail"] : spec.filters.sourceReport
-        return try buildResult(
+        return try await buildResult(
             dataset: .finance,
             spec: spec,
             selection: selection,
             source: source,
-            records: records
+            records: records,
+            allowFXNetwork: offline == false
         )
     }
 
@@ -233,7 +243,7 @@ public final class AnalyticsEngine {
             refresh: refresh
         )
         let records = try loadAnalyticsRecords(window: selection.window, filters: spec.filters, descriptors: reportDescriptors)
-        return try buildResult(
+        return try await buildResult(
             dataset: .analytics,
             spec: spec,
             selection: selection,
@@ -244,7 +254,8 @@ public final class AnalyticsEngine {
                     code: "analytics-privacy",
                     message: "Analytics reports can omit rows or metric values because Apple applies privacy thresholds and late corrections."
                 )
-            ]
+            ],
+            allowFXNetwork: false
         )
     }
 
@@ -361,7 +372,14 @@ public final class AnalyticsEngine {
             source: ["summary-sales", "customer-reviews", "finance"],
             data: QueryResultData(brief: briefRows),
             comparison: QueryComparisonEnvelope(mode: compareMode, current: selection.envelope, previous: compareSelection.envelope),
-            warnings: [],
+            warnings: deduplicatedWarnings(
+                salesCurrent.warnings +
+                salesPrevious.warnings +
+                reviewsCurrent.warnings +
+                reviewsPrevious.warnings +
+                financeCurrent.warnings +
+                financePrevious.warnings
+            ),
             tableModel: tableModel
         )
     }
@@ -372,14 +390,16 @@ public final class AnalyticsEngine {
         selection: ResolvedSelection,
         source: [String],
         records: [QueryRecord],
-        baseWarnings: [QueryWarning] = []
-    ) throws -> QueryResult {
+        baseWarnings: [QueryWarning] = [],
+        allowFXNetwork: Bool
+    ) async throws -> QueryResult {
         let sortedRecords = records.sorted { lhs, rhs in
             (lhs.dimensions["date"] ?? "") > (rhs.dimensions["date"] ?? "")
         }
         switch spec.operation {
         case .records:
-            let limited = spec.limit.map { Array(sortedRecords.prefix(max(0, $0))) } ?? sortedRecords
+            let current = try await normalizeMonetaryRecords(dataset: dataset, records: sortedRecords, allowNetwork: allowFXNetwork)
+            let limited = spec.limit.map { Array(current.records.prefix(max(0, $0))) } ?? current.records
             return QueryResult(
                 dataset: dataset,
                 operation: .records,
@@ -387,13 +407,14 @@ public final class AnalyticsEngine {
                 filters: spec.filters,
                 source: source,
                 data: QueryResultData(records: limited),
-                warnings: baseWarnings,
+                warnings: baseWarnings + current.warnings,
                 tableModel: makeRecordsTable(dataset: dataset, records: limited)
             )
         case .aggregate:
+            let current = try await normalizeMonetaryRecords(dataset: dataset, records: sortedRecords, allowNetwork: allowFXNetwork)
             let aggregateRows = finalizeAggregateRows(
                 dataset: dataset,
-                rows: aggregate(records: sortedRecords, groupBy: spec.groupBy, dataset: dataset)
+                rows: aggregate(records: current.records, groupBy: spec.groupBy, dataset: dataset)
             )
             return QueryResult(
                 dataset: dataset,
@@ -402,7 +423,7 @@ public final class AnalyticsEngine {
                 filters: spec.filters,
                 source: source,
                 data: QueryResultData(aggregates: aggregateRows),
-                warnings: baseWarnings,
+                warnings: baseWarnings + current.warnings,
                 tableModel: makeAggregateTable(rows: aggregateRows)
             )
         case .compare:
@@ -414,13 +435,15 @@ public final class AnalyticsEngine {
                 selection: previousSelection,
                 source: source
             )
+            let current = try await normalizeMonetaryRecords(dataset: dataset, records: sortedRecords, allowNetwork: allowFXNetwork)
+            let previous = try await normalizeMonetaryRecords(dataset: dataset, records: previousRecords, allowNetwork: allowFXNetwork)
             let currentAggregates = finalizeAggregateRows(
                 dataset: dataset,
-                rows: aggregate(records: sortedRecords, groupBy: spec.groupBy, dataset: dataset)
+                rows: aggregate(records: current.records, groupBy: spec.groupBy, dataset: dataset)
             )
             let previousAggregates = finalizeAggregateRows(
                 dataset: dataset,
-                rows: aggregate(records: previousRecords, groupBy: spec.groupBy, dataset: dataset)
+                rows: aggregate(records: previous.records, groupBy: spec.groupBy, dataset: dataset)
             )
             let comparisons = compareAggregateRows(current: currentAggregates, previous: previousAggregates)
             return QueryResult(
@@ -431,7 +454,7 @@ public final class AnalyticsEngine {
                 source: source,
                 data: QueryResultData(comparisons: comparisons),
                 comparison: QueryComparisonEnvelope(mode: mode, current: selection.envelope, previous: previousSelection.envelope),
-                warnings: baseWarnings,
+                warnings: baseWarnings + current.warnings + previous.warnings,
                 tableModel: makeComparisonTable(rows: comparisons)
             )
         case .brief:
@@ -766,6 +789,7 @@ public final class AnalyticsEngine {
             )
             return rows.compactMap { (row: ParsedFinanceRow) -> QueryRecord? in
                 guard filters.territory.isEmpty || matchesAny(row.countryOfSale, in: filters.territory) else { return nil }
+                guard filters.currency.isEmpty || matchesAny(row.currency, in: filters.currency) else { return nil }
                 guard filters.sku.isEmpty || matchesAny(row.productRef, in: filters.sku) else { return nil }
                 guard filters.app.isEmpty || matchesAny(row.productRef, in: filters.app) else { return nil }
                 return QueryRecord(
@@ -1041,6 +1065,199 @@ public final class AnalyticsEngine {
         return TableModel(columns: columns, rows: tableRows)
     }
 
+    private struct MonetaryNormalizationResult {
+        var records: [QueryRecord]
+        var warnings: [QueryWarning]
+    }
+
+    private func normalizeMonetaryRecords(
+        dataset: QueryDataset,
+        records: [QueryRecord],
+        allowNetwork: Bool
+    ) async throws -> MonetaryNormalizationResult {
+        switch dataset {
+        case .sales:
+            return try await normalizeSalesRecords(records: records, allowNetwork: allowNetwork)
+        case .finance:
+            return try await normalizeFinanceRecords(records: records, allowNetwork: allowNetwork)
+        default:
+            return MonetaryNormalizationResult(records: records, warnings: [])
+        }
+    }
+
+    private func normalizeSalesRecords(
+        records: [QueryRecord],
+        allowNetwork: Bool
+    ) async throws -> MonetaryNormalizationResult {
+        let proceedsRequests = fxRequests(records: records, metric: "proceeds", currencyDimension: "currency")
+        let salesRequests = fxRequests(records: records, metric: "sales", currencyDimension: "customerCurrency")
+        let rates = try await fxService.resolveRates(
+            for: proceedsRequests.union(salesRequests),
+            targetCurrencyCode: reportingCurrency,
+            allowNetwork: allowNetwork
+        )
+
+        var sawNonReportingCurrency = false
+        var missing: Set<String> = []
+        let normalized = records.map { record in
+            var metrics = record.metrics
+            if let proceeds = metrics["proceeds"] {
+                if let converted = normalizeCurrencyMetric(
+                    amount: proceeds,
+                    dateKey: record.dimensions["date"],
+                    currencyCode: record.dimensions["currency"],
+                    rates: rates,
+                    sawNonReportingCurrency: &sawNonReportingCurrency,
+                    missing: &missing
+                ) {
+                    metrics["proceeds"] = converted
+                }
+            }
+            if let sales = metrics["sales"] {
+                if let converted = normalizeCurrencyMetric(
+                    amount: sales,
+                    dateKey: record.dimensions["date"],
+                    currencyCode: record.dimensions["customerCurrency"] ?? record.dimensions["currency"],
+                    rates: rates,
+                    sawNonReportingCurrency: &sawNonReportingCurrency,
+                    missing: &missing
+                ) {
+                    metrics["sales"] = converted
+                }
+            }
+            return QueryRecord(id: record.id, dimensions: record.dimensions, metrics: metrics)
+        }
+
+        return MonetaryNormalizationResult(
+            records: normalized,
+            warnings: try monetaryWarnings(
+                sawNonReportingCurrency: sawNonReportingCurrency,
+                missing: missing
+            )
+        )
+    }
+
+    private func normalizeFinanceRecords(
+        records: [QueryRecord],
+        allowNetwork: Bool
+    ) async throws -> MonetaryNormalizationResult {
+        let requests = fxRequests(records: records, metric: "amount", currencyDimension: "currency")
+            .union(fxRequests(records: records, metric: "proceeds", currencyDimension: "currency"))
+        let rates = try await fxService.resolveRates(
+            for: requests,
+            targetCurrencyCode: reportingCurrency,
+            allowNetwork: allowNetwork
+        )
+
+        var sawNonReportingCurrency = false
+        var missing: Set<String> = []
+        let normalized = records.map { record in
+            var metrics = record.metrics
+            if let amount = metrics["amount"] {
+                if let converted = normalizeCurrencyMetric(
+                    amount: amount,
+                    dateKey: record.dimensions["date"],
+                    currencyCode: record.dimensions["currency"],
+                    rates: rates,
+                    sawNonReportingCurrency: &sawNonReportingCurrency,
+                    missing: &missing
+                ) {
+                    metrics["amount"] = converted
+                }
+            }
+            if let proceeds = metrics["proceeds"] {
+                if let converted = normalizeCurrencyMetric(
+                    amount: proceeds,
+                    dateKey: record.dimensions["date"],
+                    currencyCode: record.dimensions["currency"],
+                    rates: rates,
+                    sawNonReportingCurrency: &sawNonReportingCurrency,
+                    missing: &missing
+                ) {
+                    metrics["proceeds"] = converted
+                }
+            }
+            return QueryRecord(id: record.id, dimensions: record.dimensions, metrics: metrics)
+        }
+
+        return MonetaryNormalizationResult(
+            records: normalized,
+            warnings: try monetaryWarnings(
+                sawNonReportingCurrency: sawNonReportingCurrency,
+                missing: missing
+            )
+        )
+    }
+
+    private func fxRequests(
+        records: [QueryRecord],
+        metric: String,
+        currencyDimension: String
+    ) -> Set<FXLookupRequest> {
+        Set(records.compactMap { record in
+            guard let amount = record.metrics[metric], amount != 0 else { return nil }
+            guard let dateKey = record.dimensions["date"], dateKey.isEmpty == false else { return nil }
+            guard let currencyCode = record.dimensions[currencyDimension] ?? record.dimensions["currency"], currencyCode.isEmpty == false else {
+                return nil
+            }
+            let normalized = currencyCode.normalizedCurrencyCode
+            guard normalized.isUnknownCurrencyCode == false else { return nil }
+            return FXLookupRequest(dateKey: dateKey, currencyCode: normalized)
+        })
+    }
+
+    private func normalizeCurrencyMetric(
+        amount: Double,
+        dateKey: String?,
+        currencyCode: String?,
+        rates: [FXLookupRequest: Double],
+        sawNonReportingCurrency: inout Bool,
+        missing: inout Set<String>
+    ) -> Double? {
+        guard let dateKey, dateKey.isEmpty == false else { return nil }
+        let normalizedCurrency = (currencyCode ?? "").normalizedCurrencyCode
+        if normalizedCurrency == reportingCurrency {
+            return amount
+        }
+        if normalizedCurrency.isUnknownCurrencyCode {
+            if amount != 0 {
+                missing.insert("\(dateKey)/\(normalizedCurrency)")
+            }
+            return nil
+        }
+        sawNonReportingCurrency = true
+        if let rate = rates[FXLookupRequest(dateKey: dateKey, currencyCode: normalizedCurrency)] {
+            return amount * rate
+        }
+        if amount != 0 {
+            missing.insert("\(dateKey)/\(normalizedCurrency)")
+        }
+        return nil
+    }
+
+    private func monetaryWarnings(
+        sawNonReportingCurrency: Bool,
+        missing: Set<String>
+    ) throws -> [QueryWarning] {
+        if missing.isEmpty == false {
+            let preview = missing.sorted().prefix(4).joined(separator: ", ")
+            throw AnalyticsEngineError.invalidQuery(
+                "Missing FX rates for \(reportingCurrency): \(preview). Run without --offline to refresh, or switch reporting currency."
+            )
+        }
+
+        var warnings: [QueryWarning] = []
+        if sawNonReportingCurrency {
+            warnings.append(
+                QueryWarning(
+                    code: "currency-normalized",
+                    message: "Monetary metrics are normalized to \(reportingCurrency)."
+                )
+            )
+        }
+        return warnings
+    }
+
     private enum BriefFormat {
         case number
         case decimal
@@ -1074,7 +1291,7 @@ public final class AnalyticsEngine {
         case .decimal:
             return String(format: "%.2f", value)
         case .currency:
-            return String(format: "$%.2f", value)
+            return "\(reportingCurrency) " + String(format: "%.2f", value)
         case .percentage:
             return formatPercent(value)
         }
@@ -1161,6 +1378,7 @@ public final class AnalyticsEngine {
         let day = Calendar.pacific.startOfDay(for: row.businessDatePT)
         guard window.startDate <= day, day <= window.endDate else { return nil }
         guard filters.territory.isEmpty || matchesAny(row.territory, in: filters.territory) else { return nil }
+        guard filters.currency.isEmpty || matchesAny(row.currencyOfProceeds, in: filters.currency) || matchesAny(row.customerCurrency, in: filters.currency) else { return nil }
         guard filters.device.isEmpty || matchesAny(row.device, in: filters.device) else { return nil }
         guard filters.sku.isEmpty || matchesAny(row.sku, in: filters.sku) else { return nil }
         if filters.app.isEmpty == false {
@@ -1182,6 +1400,8 @@ public final class AnalyticsEngine {
                 "sku": row.sku,
                 "version": row.version,
                 "territory": row.territory,
+                "currency": row.currencyOfProceeds,
+                "customerCurrency": row.customerCurrency,
                 "device": row.device,
                 "productType": row.productTypeIdentifier,
                 "reportType": reportType.rawValue,
@@ -1207,6 +1427,7 @@ public final class AnalyticsEngine {
         let day = Calendar.pacific.startOfDay(for: row.businessDatePT)
         guard window.startDate <= day, day <= window.endDate else { return nil }
         guard filters.territory.isEmpty || matchesAny(row.country, in: filters.territory) else { return nil }
+        guard filters.currency.isEmpty || matchesAny(row.proceedsCurrency, in: filters.currency) || matchesAny(row.customerCurrency, in: filters.currency) else { return nil }
         guard filters.device.isEmpty || matchesAny(row.device, in: filters.device) else { return nil }
         guard filters.subscription.isEmpty || matchesAny(row.subscriptionName, in: filters.subscription) || matchesAny(row.subscriptionAppleID, in: filters.subscription) else {
             return nil
@@ -1221,7 +1442,10 @@ public final class AnalyticsEngine {
                 "app": row.appName,
                 "sku": row.subscriptionAppleID,
                 "subscription": row.subscriptionName,
+                "subscriptionDuration": row.standardSubscriptionDuration,
                 "territory": row.country,
+                "currency": row.proceedsCurrency,
+                "customerCurrency": row.customerCurrency,
                 "device": row.device,
                 "reportType": SalesReportFamily.subscription.rawValue,
                 "sourceReport": SalesReportFamily.subscription.rawValue
@@ -1245,6 +1469,7 @@ public final class AnalyticsEngine {
         let day = Calendar.pacific.startOfDay(for: row.businessDatePT)
         guard window.startDate <= day, day <= window.endDate else { return nil }
         guard filters.territory.isEmpty || matchesAny(row.country, in: filters.territory) else { return nil }
+        guard filters.currency.isEmpty || matchesAny(row.proceedsCurrency, in: filters.currency) else { return nil }
         guard filters.device.isEmpty || matchesAny(row.device, in: filters.device) else { return nil }
         guard filters.subscription.isEmpty || matchesAny(row.subscriptionName, in: filters.subscription) else { return nil }
         if filters.app.isEmpty == false, matchesAny(row.appName, in: filters.app) == false {
@@ -1257,7 +1482,10 @@ public final class AnalyticsEngine {
                 "app": row.appName,
                 "subscription": row.subscriptionName,
                 "sku": row.subscriptionAppleID,
+                "subscriptionDuration": row.standardSubscriptionDuration,
+                "eventName": row.eventName,
                 "territory": row.country,
+                "currency": row.proceedsCurrency,
                 "device": row.device,
                 "reportType": SalesReportFamily.subscriptionEvent.rawValue,
                 "sourceReport": SalesReportFamily.subscriptionEvent.rawValue
@@ -1278,6 +1506,7 @@ public final class AnalyticsEngine {
         let day = Calendar.pacific.startOfDay(for: row.businessDatePT)
         guard window.startDate <= day, day <= window.endDate else { return nil }
         guard filters.territory.isEmpty || matchesAny(row.country, in: filters.territory) else { return nil }
+        guard filters.currency.isEmpty || matchesAny(row.proceedsCurrency, in: filters.currency) else { return nil }
         guard filters.device.isEmpty || matchesAny(row.device, in: filters.device) else { return nil }
         guard filters.subscription.isEmpty || matchesAny(row.subscriptionName, in: filters.subscription) else { return nil }
         if filters.app.isEmpty == false, matchesAny(row.appName, in: filters.app) == false {
@@ -1290,7 +1519,9 @@ public final class AnalyticsEngine {
                 "app": row.appName,
                 "subscription": row.subscriptionName,
                 "sku": row.subscriptionAppleID,
+                "subscriptionDuration": row.standardSubscriptionDuration,
                 "territory": row.country,
+                "currency": row.proceedsCurrency,
                 "device": row.device,
                 "reportType": SalesReportFamily.subscriber.rawValue,
                 "sourceReport": SalesReportFamily.subscriber.rawValue
@@ -1315,6 +1546,13 @@ public final class AnalyticsEngine {
 
     private func normalizedGroupKey(_ group: [String: String]) -> String {
         group.keys.sorted().map { "\($0)=\(group[$0] ?? "")" }.joined(separator: "|")
+    }
+
+    private func deduplicatedWarnings(_ warnings: [QueryWarning]) -> [QueryWarning] {
+        var seen: Set<String> = []
+        return warnings.filter { warning in
+            seen.insert("\(warning.code)|\(warning.message)").inserted
+        }
     }
 
     private func normalizedStrings(_ values: [String]) -> Set<String> {
@@ -1439,10 +1677,8 @@ public final class AnalyticsEngine {
             return ResolvedSelection(
                 kind: .range,
                 original: QueryTimeSelection(
-                    datePT: time.datePT,
                     startDatePT: window.startDatePT,
-                    endDatePT: window.endDatePT,
-                    rangePreset: time.rangePreset
+                    endDatePT: window.endDatePT
                 ),
                 window: window,
                 fiscalMonths: fiscalMonthsOverlapping(window: window),

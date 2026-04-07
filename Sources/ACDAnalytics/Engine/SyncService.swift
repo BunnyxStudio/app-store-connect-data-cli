@@ -48,12 +48,14 @@ public final class SyncService {
         var records: [CachedReportRecord] = []
         let policy: ReportCachePolicy = force ? .reloadIgnoringCache : .useCached
         for date in dates {
-            let report = try await downloader.fetchSalesDaily(datePT: date, cachePolicy: policy)
-            records.append(try cacheStore.record(report: report))
+            try await appendIfAvailable(&records) {
+                try await downloader.fetchSalesDaily(datePT: date, cachePolicy: policy)
+            }
         }
         for fiscalMonth in monthlyFiscalMonths {
-            let report = try await downloader.fetchSalesMonthly(fiscalMonth: fiscalMonth, cachePolicy: policy)
-            records.append(try cacheStore.record(report: report))
+            try await appendIfAvailable(&records) {
+                try await downloader.fetchSalesMonthly(fiscalMonth: fiscalMonth, cachePolicy: policy)
+            }
         }
         return SyncSummary(records: records)
     }
@@ -86,24 +88,29 @@ public final class SyncService {
         let dates = ptDates(in: window)
         for date in dates {
             if requested.contains(.subscription) {
-                let report = try await downloader.fetchSubscriptionDaily(datePT: date, cachePolicy: policy)
-                records.append(try cacheStore.record(report: report))
+                try await appendIfAvailable(&records) {
+                    try await downloader.fetchSubscriptionDaily(datePT: date, cachePolicy: policy)
+                }
             }
             if requested.contains(.subscriptionEvent) {
-                let report = try await downloader.fetchSubscriptionEventDaily(datePT: date, cachePolicy: policy)
-                records.append(try cacheStore.record(report: report))
+                try await appendIfAvailable(&records) {
+                    try await downloader.fetchSubscriptionEventDaily(datePT: date, cachePolicy: policy)
+                }
             }
             if requested.contains(.subscriber) {
-                let report = try await downloader.fetchSubscriberDaily(datePT: date, cachePolicy: policy)
-                records.append(try cacheStore.record(report: report))
+                try await appendIfAvailable(&records) {
+                    try await downloader.fetchSubscriberDaily(datePT: date, cachePolicy: policy)
+                }
             }
             if requested.contains(.preOrder) {
-                let report = try await downloader.fetchPreOrderDaily(datePT: date, cachePolicy: policy)
-                records.append(try cacheStore.record(report: report))
+                try await appendIfAvailable(&records) {
+                    try await downloader.fetchPreOrderDaily(datePT: date, cachePolicy: policy)
+                }
             }
             if requested.contains(.subscriptionOfferRedemption) {
-                let report = try await downloader.fetchSubscriptionOfferCodeRedemptionDaily(datePT: date, cachePolicy: policy)
-                records.append(try cacheStore.record(report: report))
+                try await appendIfAvailable(&records) {
+                    try await downloader.fetchSubscriptionOfferCodeRedemptionDaily(datePT: date, cachePolicy: policy)
+                }
             }
         }
 
@@ -117,12 +124,15 @@ public final class SyncService {
         var records: [CachedReportRecord] = []
         let policy: ReportCachePolicy = force ? .reloadIgnoringCache : .useCached
         for date in dates {
-            let summary = try await downloader.fetchSubscriptionDaily(datePT: date, cachePolicy: policy)
-            let events = try await downloader.fetchSubscriptionEventDaily(datePT: date, cachePolicy: policy)
-            let subscribers = try await downloader.fetchSubscriberDaily(datePT: date, cachePolicy: policy)
-            records.append(try cacheStore.record(report: summary))
-            records.append(try cacheStore.record(report: events))
-            records.append(try cacheStore.record(report: subscribers))
+            try await appendIfAvailable(&records) {
+                try await downloader.fetchSubscriptionDaily(datePT: date, cachePolicy: policy)
+            }
+            try await appendIfAvailable(&records) {
+                try await downloader.fetchSubscriptionEventDaily(datePT: date, cachePolicy: policy)
+            }
+            try await appendIfAvailable(&records) {
+                try await downloader.fetchSubscriberDaily(datePT: date, cachePolicy: policy)
+            }
         }
         return SyncSummary(records: records)
     }
@@ -145,13 +155,14 @@ public final class SyncService {
         for fiscalMonth in fiscalMonths {
             for reportType in reportTypes {
                 for regionCode in regionCodes {
-                    let report = try await downloader.fetchFinanceMonth(
-                        fiscalMonth: fiscalMonth,
-                        reportType: reportType,
-                        regionCode: regionCode,
-                        cachePolicy: policy
-                    )
-                    records.append(try cacheStore.record(report: report))
+                    try await appendIfAvailable(&records) {
+                        try await downloader.fetchFinanceMonth(
+                            fiscalMonth: fiscalMonth,
+                            reportType: reportType,
+                            regionCode: regionCode,
+                            cachePolicy: policy
+                        )
+                    }
                 }
             }
         }
@@ -188,5 +199,16 @@ public final class SyncService {
         )
         try cacheStore.saveReviews(CachedReviewsPayload(fetchedAt: Date(), reviews: reviews))
         return SyncSummary(records: [], reviewCount: reviews.count)
+    }
+
+    private func appendIfAvailable(
+        _ records: inout [CachedReportRecord],
+        load: () async throws -> DownloadedReport
+    ) async throws {
+        do {
+            let report = try await load()
+            records.append(try cacheStore.record(report: report))
+        } catch ASCClientError.reportNotAvailableYet {
+        }
     }
 }

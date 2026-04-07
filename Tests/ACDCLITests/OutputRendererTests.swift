@@ -60,4 +60,85 @@ final class OutputRendererTests: XCTestCase {
         XCTAssertTrue(rendered.contains("# Capabilities"))
         XCTAssertTrue(rendered.contains("`sales`"))
     }
+
+    func testTableRenderIncludesWarningsForQueryResult() throws {
+        let rendered = try OutputRenderer.render(
+            QueryResult(
+                dataset: .sales,
+                operation: .aggregate,
+                time: QueryTimeEnvelope(label: "last week", startDatePT: "2026-02-10", endDatePT: "2026-02-16"),
+                filters: QueryFilterSet(),
+                source: ["summary-sales"],
+                data: QueryResultData(aggregates: [
+                    QueryAggregateRow(group: [:], metrics: ["proceeds": 120])
+                ]),
+                warnings: [
+                    QueryWarning(
+                        code: "currency-normalized",
+                        message: "Monetary metrics are normalized to CNY."
+                    )
+                ],
+                tableModel: TableModel(
+                    columns: ["proceeds"],
+                    rows: [["120.00"]]
+                )
+            ),
+            format: .table
+        )
+
+        XCTAssertTrue(rendered.contains("proceeds"))
+        XCTAssertTrue(rendered.contains("Warning: Monetary metrics are normalized to CNY."))
+    }
+
+    func testTableRenderAddsBlankLineAroundOutput() throws {
+        let rendered = try OutputRenderer.render(
+            TableModel(
+                columns: ["metric", "value"],
+                rows: [["Sales proceeds", "120.00"]]
+            ),
+            format: .table
+        )
+
+        XCTAssertTrue(rendered.hasPrefix("\nmetric"))
+        XCTAssertTrue(rendered.hasSuffix("\n"))
+    }
+
+    func testTableRenderForBriefSummaryUsesSeparateTables() throws {
+        let rendered = try OutputRenderer.render(
+            BriefSummaryReport(
+                title: "Last Week Summary",
+                currentLabel: "2026-04-01 to 2026-04-07",
+                compareLabel: "2026-03-25 to 2026-03-31",
+                reportingCurrency: "CNY",
+                sections: [
+                    BriefSummarySection(
+                        title: "Overview",
+                        note: "Important metrics.",
+                        table: TableModel(
+                            columns: ["metric", "current"],
+                            rows: [["Sales Proceeds", "CNY 100.00"]]
+                        )
+                    ),
+                    BriefSummarySection(
+                        title: "Top Products",
+                        note: nil,
+                        table: TableModel(
+                            columns: ["product", "proceeds"],
+                            rows: [["Pro", "CNY 80.00"]]
+                        )
+                    )
+                ],
+                warnings: [
+                    QueryWarning(code: "fx", message: "Monetary metrics are normalized to CNY.")
+                ]
+            ),
+            format: .table
+        )
+
+        XCTAssertTrue(rendered.contains("Last Week Summary"))
+        XCTAssertTrue(rendered.contains("==== Overview ===="))
+        XCTAssertTrue(rendered.contains("==== Top Products ===="))
+        XCTAssertTrue(rendered.contains("Warning: Monetary metrics are normalized to CNY."))
+        XCTAssertTrue(rendered.contains("==== Overview ====\n\nImportant metrics.\n\nmetric"))
+    }
 }

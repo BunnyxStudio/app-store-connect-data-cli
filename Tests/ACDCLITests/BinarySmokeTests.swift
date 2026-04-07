@@ -66,6 +66,63 @@ final class BinarySmokeTests: XCTestCase {
         XCTAssertTrue(result.output.contains("subscribers"))
     }
 
+    func testBriefDailyRunsOfflineSummary() throws {
+        let workingDirectory = try makeTempDirectory()
+
+        let result = try runProcess(
+            arguments: ["brief", "daily", "--offline", "--output", "json"],
+            workingDirectory: workingDirectory
+        )
+
+        XCTAssertEqual(result.status, 0, result.output)
+        XCTAssertTrue(result.output.contains("\"title\" : \"Last Day Summary\""))
+        XCTAssertTrue(result.output.contains("\"sections\""))
+    }
+
+    func testBriefWeeklyRunsWithoutConflictingTimeSelectors() throws {
+        let workingDirectory = try makeTempDirectory()
+
+        let result = try runProcess(
+            arguments: ["brief", "weekly", "--offline", "--output", "json"],
+            workingDirectory: workingDirectory
+        )
+
+        XCTAssertEqual(result.status, 0, result.output)
+        XCTAssertTrue(result.output.contains("\"title\" : \"Last Week Summary\""))
+        XCTAssertTrue(result.output.contains("\"Overview\""))
+    }
+
+    func testBriefMonthlyRunsOfflineSummary() throws {
+        let workingDirectory = try makeTempDirectory()
+
+        let result = try runProcess(
+            arguments: ["brief", "monthly", "--offline", "--output", "json"],
+            workingDirectory: workingDirectory
+        )
+
+        XCTAssertEqual(result.status, 0, result.output)
+        XCTAssertTrue(result.output.contains("\"title\" : \"Last Month Summary\""))
+        XCTAssertTrue(result.output.contains("\"Data Health\""))
+    }
+
+    func testConfigCurrencySetWritesLocalReportingCurrency() throws {
+        let workingDirectory = try makeTempDirectory()
+
+        let setResult = try runProcess(
+            arguments: ["config", "currency", "set", "CNY", "--local", "--output", "json"],
+            workingDirectory: workingDirectory
+        )
+        XCTAssertEqual(setResult.status, 0, setResult.output)
+        XCTAssertTrue(setResult.output.contains("\"reportingCurrency\" : \"CNY\""))
+
+        let showResult = try runProcess(
+            arguments: ["config", "currency", "show", "--output", "json"],
+            workingDirectory: workingDirectory
+        )
+        XCTAssertEqual(showResult.status, 0, showResult.output)
+        XCTAssertTrue(showResult.output.contains("\"reportingCurrency\" : \"CNY\""))
+    }
+
     private func seedSubscriptionCache(in workingDirectory: URL) throws {
         let root = workingDirectory.appendingPathComponent(".app-connect-data-cli/cache", isDirectory: true)
         let cacheStore = CacheStore(rootDirectory: root)
@@ -127,6 +184,10 @@ final class BinarySmokeTests: XCTestCase {
     private func makeTempDirectory() throws -> URL {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(
+            at: url.appendingPathComponent(".app-connect-data-cli", isDirectory: true),
+            withIntermediateDirectories: true
+        )
         return url
     }
 

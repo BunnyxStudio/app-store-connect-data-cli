@@ -25,6 +25,11 @@ struct GlobalOptions: ParsableArguments {
     var output: OutputFormat = .json
 }
 
+struct BriefGlobalOptions: ParsableArguments {
+    @Option(name: .shortAndLong, help: "Output format: json, table, markdown.")
+    var output: OutputFormat = .table
+}
+
 struct CredentialsOptions: ParsableArguments {
     @Option(help: "ASC issuer ID.")
     var issuerID: String?
@@ -154,6 +159,9 @@ struct FilterOptions: ParsableArguments {
     @Option(name: .customLong("territory"), help: "Territory filter. Repeat for multiple values.")
     var territory: [String] = []
 
+    @Option(name: .customLong("currency"), help: "Currency filter. Repeat for multiple values.")
+    var currency: [String] = []
+
     @Option(name: .customLong("device"), help: "Device filter. Repeat for multiple values.")
     var device: [String] = []
 
@@ -183,6 +191,7 @@ struct FilterOptions: ParsableArguments {
             app: app,
             version: version,
             territory: territory,
+            currency: currency,
             device: device,
             sku: sku,
             subscription: subscription,
@@ -202,10 +211,28 @@ struct FetchControlOptions: ParsableArguments {
     var refresh = false
 }
 
+struct ConfigScopeOptions: ParsableArguments {
+    @Flag(name: .long, help: "Use ./.app-connect-data-cli/config.json instead of ~/.app-connect-data-cli/config.json.")
+    var local = false
+}
+
 private func nonEmpty(_ value: String?) -> String? {
     guard let value else { return nil }
     let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
     return trimmed.isEmpty ? nil : trimmed
+}
+
+private func normalizeReportingCurrency(_ value: String) throws -> String {
+    let normalized = value.normalizedCurrencyCode
+    let isThreeLetterCode = normalized.count == 3 && normalized.unicodeScalars.allSatisfy(CharacterSet.uppercaseLetters.contains)
+    guard normalized.isUnknownCurrencyCode == false, isThreeLetterCode else {
+        throw ValidationError("Reporting currency must be a 3-letter ISO code, for example USD or CNY.")
+    }
+    return normalized
+}
+
+private func configURL(paths: RuntimePaths, local: Bool) -> URL {
+    (local ? paths.localBase : paths.userBase).appendingPathComponent("config.json")
 }
 
 private func makeRuntime(
@@ -227,7 +254,7 @@ private func makeSpec(
     operation: QueryOperation,
     time: TimeSelectionOptions,
     filters: FilterOptions,
-    compare: CompareOptions,
+    compare: CompareOptions?,
     groupBy: [QueryGroupBy],
     defaultPreset: PTDateRangePreset
 ) throws -> DataQuerySpec {
@@ -235,8 +262,8 @@ private func makeSpec(
         dataset: dataset,
         operation: operation,
         time: try time.selection(defaultPreset: defaultPreset),
-        compare: try compare.mode(),
-        compareTime: compare.customSelection(),
+        compare: try compare?.mode(),
+        compareTime: compare?.customSelection(),
         filters: filters.queryFilters(),
         groupBy: groupBy,
         limit: filters.limit
@@ -249,7 +276,7 @@ struct ACDCommand: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "adc",
         abstract: "Direct App Store Connect data queries for official Apple reporting APIs.",
-        subcommands: [Auth.self, Capabilities.self, Sales.self, Reviews.self, Finance.self, Analytics.self, Brief.self, Query.self, Cache.self]
+        subcommands: [Auth.self, Config.self, Capabilities.self, Sales.self, Reviews.self, Finance.self, Analytics.self, Brief.self, Query.self, Cache.self]
     )
 }
 
@@ -273,6 +300,60 @@ extension ACDCommand {
                     ],
                     format: global.output
                 )
+            }
+        }
+    }
+
+    struct Config: AsyncParsableCommand {
+        static let configuration = CommandConfiguration(subcommands: [Currency.self])
+
+        struct Currency: AsyncParsableCommand {
+            static let configuration = CommandConfiguration(subcommands: [Show.self, Set.self])
+
+            struct Show: AsyncParsableCommand {
+                @OptionGroup var global: GlobalOptions
+                @OptionGroup var scope: ConfigScopeOptions
+
+                mutating func run() async throws {
+                    let runtime = try RuntimeFactory.make(credentialsMode: .disabled)
+                    let targetURL = configURL(paths: runtime.paths, local: scope.local)
+                    let storedConfig = try RuntimeFactory.loadConfig(at: targetURL)
+                    let reportingCurrency = scope.local
+                        ? (storedConfig?.reportingCurrency ?? "")
+                        : (runtime.config.reportingCurrency ?? "USD")
+                    try OutputRenderer.write(
+                        [
+                            "scope": scope.local ? "local" : "effective",
+                            "reportingCurrency": reportingCurrency,
+                            "path": scope.local ? targetURL.path : ""
+                        ],
+                        format: global.output
+                    )
+                }
+            }
+
+            struct Set: AsyncParsableCommand {
+                @OptionGroup var global: GlobalOptions
+                @OptionGroup var scope: ConfigScopeOptions
+                @Argument(help: "3-letter ISO currency code, for example USD or CNY.")
+                var code: String
+
+                mutating func run() async throws {
+                    let runtime = try RuntimeFactory.make(credentialsMode: .disabled)
+                    let targetURL = configURL(paths: runtime.paths, local: scope.local)
+                    var config = try RuntimeFactory.loadConfig(at: targetURL) ?? ACDConfig()
+                    config.reportingCurrency = try normalizeReportingCurrency(code)
+                    try RuntimeFactory.saveConfig(config, at: targetURL)
+                    try OutputRenderer.write(
+                        [
+                            "status": "ok",
+                            "scope": scope.local ? "local" : "user",
+                            "reportingCurrency": config.reportingCurrency ?? "USD",
+                            "path": targetURL.path
+                        ],
+                        format: global.output
+                    )
+                }
             }
         }
     }
@@ -308,7 +389,7 @@ extension ACDCommand {
     }
 
     struct Brief: AsyncParsableCommand {
-        static let configuration = CommandConfiguration(subcommands: [Weekly.self, Monthly.self])
+        static let configuration = CommandConfiguration(subcommands: [Daily.self, Weekly.self, Monthly.self])
     }
 
     struct Query: AsyncParsableCommand {
@@ -367,7 +448,7 @@ private extension DatasetCommand where Self: AsyncParsableCommand {
         credentials: CredentialsOptions,
         time: TimeSelectionOptions,
         filters: FilterOptions,
-        compare: CompareOptions,
+        compare: CompareOptions?,
         groupBy: [QueryGroupBy],
         fetch: FetchControlOptions
     ) async throws {
@@ -397,7 +478,7 @@ extension ACDCommand.Sales {
         @OptionGroup var fetch: FetchControlOptions
 
         mutating func run() async throws {
-            try await executeDataset(operation: .records, global: global, credentials: credentials, time: time, filters: filters, compare: CompareOptions(), groupBy: [], fetch: fetch)
+            try await executeDataset(operation: .records, global: global, credentials: credentials, time: time, filters: filters, compare: nil, groupBy: [], fetch: fetch)
         }
     }
 
@@ -447,7 +528,7 @@ extension ACDCommand.Reviews {
         @OptionGroup var fetch: FetchControlOptions
 
         mutating func run() async throws {
-            try await executeDataset(operation: .records, global: global, credentials: credentials, time: time, filters: filters, compare: CompareOptions(), groupBy: [], fetch: fetch)
+            try await executeDataset(operation: .records, global: global, credentials: credentials, time: time, filters: filters, compare: nil, groupBy: [], fetch: fetch)
         }
     }
 
@@ -497,7 +578,7 @@ extension ACDCommand.Finance {
         @OptionGroup var fetch: FetchControlOptions
 
         mutating func run() async throws {
-            try await executeDataset(operation: .records, global: global, credentials: credentials, time: time, filters: filters, compare: CompareOptions(), groupBy: [], fetch: fetch)
+            try await executeDataset(operation: .records, global: global, credentials: credentials, time: time, filters: filters, compare: nil, groupBy: [], fetch: fetch)
         }
     }
 
@@ -547,7 +628,7 @@ extension ACDCommand.Analytics {
         @OptionGroup var fetch: FetchControlOptions
 
         mutating func run() async throws {
-            try await executeDataset(operation: .records, global: global, credentials: credentials, time: time, filters: filters, compare: CompareOptions(), groupBy: [], fetch: fetch)
+            try await executeDataset(operation: .records, global: global, credentials: credentials, time: time, filters: filters, compare: nil, groupBy: [], fetch: fetch)
         }
     }
 
@@ -587,39 +668,42 @@ extension ACDCommand.Analytics {
 }
 
 extension ACDCommand.Brief {
-    struct Weekly: AsyncParsableCommand {
-        @OptionGroup var global: GlobalOptions
+    struct Daily: AsyncParsableCommand {
+        @OptionGroup var global: BriefGlobalOptions
         @OptionGroup var credentials: CredentialsOptions
         @OptionGroup var fetch: FetchControlOptions
 
         mutating func run() async throws {
             let runtime = try makeRuntime(credentials: credentials, offline: fetch.offline)
-            let spec = DataQuerySpec(
-                dataset: .brief,
-                operation: .brief,
-                time: QueryTimeSelection(rangePreset: PTDateRangePreset.lastWeek.rawValue),
-                compare: .weekOverWeek
-            )
-            let result = try await runtime.analytics.execute(spec: spec, offline: fetch.offline, refresh: fetch.refresh)
-            try OutputRenderer.write(result, format: global.output)
+            let report = try await BriefSummaryBuilder(runtime: runtime, offline: fetch.offline, refresh: fetch.refresh)
+                .build(period: .daily)
+            try OutputRenderer.write(report, format: global.output)
+        }
+    }
+
+    struct Weekly: AsyncParsableCommand {
+        @OptionGroup var global: BriefGlobalOptions
+        @OptionGroup var credentials: CredentialsOptions
+        @OptionGroup var fetch: FetchControlOptions
+
+        mutating func run() async throws {
+            let runtime = try makeRuntime(credentials: credentials, offline: fetch.offline)
+            let report = try await BriefSummaryBuilder(runtime: runtime, offline: fetch.offline, refresh: fetch.refresh)
+                .build(period: .weekly)
+            try OutputRenderer.write(report, format: global.output)
         }
     }
 
     struct Monthly: AsyncParsableCommand {
-        @OptionGroup var global: GlobalOptions
+        @OptionGroup var global: BriefGlobalOptions
         @OptionGroup var credentials: CredentialsOptions
         @OptionGroup var fetch: FetchControlOptions
 
         mutating func run() async throws {
             let runtime = try makeRuntime(credentials: credentials, offline: fetch.offline)
-            let spec = DataQuerySpec(
-                dataset: .brief,
-                operation: .brief,
-                time: QueryTimeSelection(rangePreset: PTDateRangePreset.lastMonth.rawValue),
-                compare: .monthOverMonth
-            )
-            let result = try await runtime.analytics.execute(spec: spec, offline: fetch.offline, refresh: fetch.refresh)
-            try OutputRenderer.write(result, format: global.output)
+            let report = try await BriefSummaryBuilder(runtime: runtime, offline: fetch.offline, refresh: fetch.refresh)
+                .build(period: .monthly)
+            try OutputRenderer.write(report, format: global.output)
         }
     }
 }

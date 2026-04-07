@@ -101,7 +101,10 @@ enum RuntimeFactory {
                 client: nil,
                 downloader: nil,
                 syncService: nil,
-                analytics: AnalyticsEngine(cacheStore: cacheStore)
+                analytics: AnalyticsEngine(
+                    cacheStore: cacheStore,
+                    reportingCurrency: config.reportingCurrency ?? "USD"
+                )
             )
         }
 
@@ -119,7 +122,10 @@ enum RuntimeFactory {
                 client: nil,
                 downloader: nil,
                 syncService: nil,
-                analytics: AnalyticsEngine(cacheStore: cacheStore)
+                analytics: AnalyticsEngine(
+                    cacheStore: cacheStore,
+                    reportingCurrency: config.reportingCurrency ?? "USD"
+                )
             )
         }
 
@@ -149,6 +155,8 @@ enum RuntimeFactory {
             syncService: syncService,
             client: client,
             downloader: downloader
+            ,
+            reportingCurrency: config.reportingCurrency ?? "USD"
         )
         return RuntimeContext(
             config: config,
@@ -171,15 +179,27 @@ enum RuntimeFactory {
             issuerID: firstNonEmpty(overrides.issuerID, env["ASC_ISSUER_ID"], localConfig?.issuerID, userConfig?.issuerID),
             keyID: firstNonEmpty(overrides.keyID, env["ASC_KEY_ID"], localConfig?.keyID, userConfig?.keyID),
             vendorNumber: firstNonEmpty(overrides.vendorNumber, env["ASC_VENDOR_NUMBER"], localConfig?.vendorNumber, userConfig?.vendorNumber),
-            p8Path: firstNonEmpty(overrides.p8Path, env["ASC_P8_PATH"], localConfig?.p8Path, userConfig?.p8Path)
+            p8Path: firstNonEmpty(overrides.p8Path, env["ASC_P8_PATH"], localConfig?.p8Path, userConfig?.p8Path),
+            reportingCurrency: firstNonEmpty(
+                env["ADC_REPORTING_CURRENCY"],
+                localConfig?.reportingCurrency,
+                userConfig?.reportingCurrency
+            )?.normalizedCurrencyCode
         )
     }
 
-    private static func loadConfig(at url: URL) throws -> ACDConfig? {
+    static func loadConfig(at url: URL) throws -> ACDConfig? {
         guard FileManager.default.fileExists(atPath: url.path) else { return nil }
         try LocalFileSecurity.validateOwnerOnlyFile(url)
         let data = try Data(contentsOf: url)
         return try JSONDecoder().decode(ACDConfig.self, from: data)
+    }
+
+    static func saveConfig(_ config: ACDConfig, at url: URL) throws {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        let data = try encoder.encode(config)
+        try LocalFileSecurity.writePrivateData(data, to: url)
     }
 
     private static func resolvedPrivateKeyPEM(config: ACDConfig) throws -> String {

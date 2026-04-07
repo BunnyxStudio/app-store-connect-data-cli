@@ -35,7 +35,7 @@ enum OutputRenderer {
             encoder.dateEncodingStrategy = .iso8601
             return String(decoding: try encoder.encode(value), as: UTF8.self)
         case .table:
-            return renderTable(value)
+            return wrapTableOutput(renderTable(value))
         case .markdown:
             return renderMarkdown(value)
         }
@@ -43,7 +43,10 @@ enum OutputRenderer {
 
     private static func renderTable<T: Encodable>(_ value: T) -> String {
         if let result = value as? QueryResult {
-            return result.tableModel.map(renderTableModel) ?? ""
+            return renderQueryResult(result, format: .table)
+        }
+        if let report = value as? BriefSummaryReport {
+            return renderBriefSummary(report, format: .table)
         }
         if let tableModel = value as? TableModel {
             return renderTableModel(tableModel)
@@ -76,7 +79,10 @@ enum OutputRenderer {
 
     private static func renderMarkdown<T: Encodable>(_ value: T) -> String {
         if let result = value as? QueryResult {
-            return result.tableModel.map(renderMarkdownTable) ?? ""
+            return renderQueryResult(result, format: .markdown)
+        }
+        if let report = value as? BriefSummaryReport {
+            return renderBriefSummary(report, format: .markdown)
         }
         if let tableModel = value as? TableModel {
             return renderMarkdownTable(tableModel)
@@ -90,8 +96,31 @@ enum OutputRenderer {
         return (try? render(value, format: .json)) ?? ""
     }
 
+    private static func renderQueryResult(_ result: QueryResult, format: OutputFormat) -> String {
+        let body: String
+        switch format {
+        case .json:
+            return (try? render(result, format: .json)) ?? ""
+        case .table:
+            body = result.tableModel.map(renderTableModel) ?? ""
+        case .markdown:
+            body = result.tableModel.map(renderMarkdownTable) ?? ""
+        }
+
+        let warnings = renderWarnings(result.warnings, format: format)
+        if body.isEmpty {
+            return warnings
+        }
+        if warnings.isEmpty {
+            return body
+        }
+        return body + "\n\n" + warnings
+    }
+
     private static func renderTableModel(_ tableModel: TableModel) -> String {
-        table(headers: tableModel.columns, rows: tableModel.rows.map { $0.map(normalizeCell) })
+        let body = table(headers: tableModel.columns, rows: tableModel.rows.map { $0.map(normalizeCell) })
+        guard let title = tableModel.title, title.isEmpty == false else { return body }
+        return formatTableTitle(title) + "\n\n" + body
     }
 
     private static func renderMarkdownTable(_ tableModel: TableModel) -> String {
@@ -99,7 +128,9 @@ enum OutputRenderer {
         let header = "| " + tableModel.columns.joined(separator: " | ") + " |"
         let divider = "| " + tableModel.columns.map { String(repeating: "-", count: max(3, $0.count)) }.joined(separator: " | ") + " |"
         let rows = tableModel.rows.map { "| " + $0.map(normalizeCell).joined(separator: " | ") + " |" }
-        return ([header, divider] + rows).joined(separator: "\n")
+        let body = ([header, divider] + rows).joined(separator: "\n")
+        guard let title = tableModel.title, title.isEmpty == false else { return body }
+        return "## \(title)\n\n" + body
     }
 
     private static func recordsTableModel(_ records: [QueryRecord]) -> TableModel {
@@ -130,6 +161,94 @@ enum OutputRenderer {
             headers: columns,
             rows: rows.map { row in columns.map { normalizeCell(row[$0] ?? "") } }
         )
+    }
+
+    private static func renderWarnings(_ warnings: [QueryWarning], format: OutputFormat) -> String {
+        guard warnings.isEmpty == false else { return "" }
+        switch format {
+        case .json:
+            return ""
+        case .table:
+            return warnings.map { "Warning: \($0.message)" }.joined(separator: "\n")
+        case .markdown:
+            return warnings.map { "> Warning: \($0.message)" }.joined(separator: "\n")
+        }
+    }
+
+    private static func renderBriefSummary(_ report: BriefSummaryReport, format: OutputFormat) -> String {
+        switch format {
+        case .json:
+            return (try? render(report, format: .json)) ?? ""
+        case .table:
+            return renderBriefSummaryTable(report)
+        case .markdown:
+            return renderBriefSummaryMarkdown(report)
+        }
+    }
+
+    private static func renderBriefSummaryTable(_ report: BriefSummaryReport) -> String {
+        var blocks: [String] = [
+            formatTableTitle(report.title),
+            "Current: \(report.currentLabel)",
+            "Compare: \(report.compareLabel)",
+            "Currency: \(report.reportingCurrency)"
+        ]
+
+        for section in report.sections {
+            var lines = [formatTableTitle(section.title)]
+            if let note = section.note, note.isEmpty == false {
+                lines.append("")
+                lines.append(note)
+            }
+            let body = renderTableModel(section.table)
+            if body.isEmpty == false {
+                lines.append("")
+                lines.append(body)
+            }
+            blocks.append(lines.joined(separator: "\n"))
+        }
+
+        let warnings = renderWarnings(report.warnings, format: .table)
+        if warnings.isEmpty == false {
+            blocks.append(warnings)
+        }
+
+        return blocks.joined(separator: "\n\n")
+    }
+
+    private static func formatTableTitle(_ title: String) -> String {
+        "==== \(title) ===="
+    }
+
+    private static func renderBriefSummaryMarkdown(_ report: BriefSummaryReport) -> String {
+        var blocks: [String] = [
+            "# \(report.title)",
+            "- Current: \(report.currentLabel)\n- Compare: \(report.compareLabel)\n- Currency: \(report.reportingCurrency)"
+        ]
+
+        for section in report.sections {
+            var lines = ["## \(section.title)"]
+            if let note = section.note, note.isEmpty == false {
+                lines.append(section.note ?? "")
+            }
+            let body = renderMarkdownTable(section.table)
+            if body.isEmpty == false {
+                lines.append(body)
+            }
+            blocks.append(lines.joined(separator: "\n\n"))
+        }
+
+        let warnings = renderWarnings(report.warnings, format: .markdown)
+        if warnings.isEmpty == false {
+            blocks.append(warnings)
+        }
+
+        return blocks.joined(separator: "\n\n")
+    }
+
+    private static func wrapTableOutput(_ value: String) -> String {
+        guard value.isEmpty == false else { return value }
+        return "\n\(value)\n"
     }
 
     private static func table(headers: [String], rows: [[String]]) -> String {

@@ -20,6 +20,7 @@ import Foundation
 final class AnalyticsEngineTests: XCTestCase {
     func testSalesAggregateFromSubscriptionFixture() async throws {
         let cacheStore = try makeCacheStore()
+        let fixtureText = try fixture(named: "subscription_2026-02-18.tsv")
         try recordReport(
             cacheStore: cacheStore,
             filename: "subscription_2026-02-18.tsv",
@@ -27,7 +28,17 @@ final class AnalyticsEngineTests: XCTestCase {
             reportType: "SUBSCRIPTION",
             reportSubType: "SUMMARY",
             reportDateKey: "2026-02-18",
-            text: try fixture(named: "subscription_2026-02-18.tsv")
+            text: fixtureText
+        )
+        let subscriptionRows = try ReportParser().parseSubscription(
+            tsv: fixtureText,
+            fallbackDatePT: try XCTUnwrap(DateFormatter.ptDateFormatter.date(from: "2026-02-18"))
+        )
+        try writeFXRates(
+            cacheStore: cacheStore,
+            requests: Set(subscriptionRows.map {
+                FXSeedRequest(dateKey: $0.businessDatePT.ptDateString, sourceCurrencyCode: $0.proceedsCurrency)
+            })
         )
 
         let engine = AnalyticsEngine(cacheStore: cacheStore)
@@ -81,6 +92,7 @@ final class AnalyticsEngineTests: XCTestCase {
 
     func testFinanceAggregateFromFixture() async throws {
         let cacheStore = try makeCacheStore()
+        let fixtureText = try fixture(named: "finance_detail_z1_2026-02.tsv")
         try recordReport(
             cacheStore: cacheStore,
             filename: "finance_detail_z1_2025-11.tsv",
@@ -88,7 +100,20 @@ final class AnalyticsEngineTests: XCTestCase {
             reportType: "FINANCE_DETAIL",
             reportSubType: "Z1",
             reportDateKey: "2025-11-FINANCE_DETAIL-Z1",
-            text: try fixture(named: "finance_detail_z1_2026-02.tsv")
+            text: fixtureText
+        )
+        let financeRows = try ReportParser().parseFinance(
+            tsv: fixtureText,
+            fiscalMonth: "2025-11",
+            regionCode: "Z1",
+            vendorNumber: "TEST_VENDOR",
+            reportVariant: "FINANCE_DETAIL"
+        )
+        try writeFXRates(
+            cacheStore: cacheStore,
+            requests: Set(financeRows.map {
+                FXSeedRequest(dateKey: $0.businessDatePT.ptDateString, sourceCurrencyCode: $0.currency)
+            })
         )
 
         let engine = AnalyticsEngine(cacheStore: cacheStore)
@@ -106,6 +131,111 @@ final class AnalyticsEngineTests: XCTestCase {
         XCTAssertEqual(result.dataset, .finance)
         XCTAssertFalse(result.data.aggregates.isEmpty)
         XCTAssertTrue(result.data.aggregates.contains { $0.group["territory"] == "CN" })
+    }
+
+    func testSalesAggregateNormalizesMixedCurrenciesToUSD() async throws {
+        let cacheStore = try makeCacheStore()
+        try recordReport(
+            cacheStore: cacheStore,
+            filename: "sales_mixed_2026-02-18.tsv",
+            source: .sales,
+            reportType: "SALES",
+            reportSubType: "SUMMARY",
+            reportDateKey: "2026-02-18",
+            text: """
+            Begin Date\tEnd Date\tTitle\tSKU\tParent Identifier\tProduct Type Identifier\tUnits\tDeveloper Proceeds\tCurrency of Proceeds\tCountry Code\tDevice\tApple Identifier\tVersion\tOrder Type\tProceeds Reason\tSupported Platforms\tCustomer Price\tCustomer Currency
+            2026-02-18\t2026-02-18\tHive App\thive.app\t\t1F\t1\t10\tUSD\tUS\tiPhone\t123\t1.0\t\t\tios\t10\tUSD
+            2026-02-18\t2026-02-18\tHive App\thive.app\t\t1F\t1\t1000\tJPY\tJP\tiPhone\t123\t1.0\t\t\tios\t1000\tJPY
+            """
+        )
+        try writeFXRates(
+            cacheStore: cacheStore,
+            json: """
+            {
+              "2026-02-18|JPY": {
+                "requestDateKey": "2026-02-18",
+                "sourceDateKey": "2026-02-18",
+                "currencyCode": "JPY",
+                "usdPerUnit": 0.01,
+                "fetchedAt": "2026-02-19T00:00:00Z"
+              }
+            }
+            """
+        )
+
+        let engine = AnalyticsEngine(cacheStore: cacheStore)
+        let result = try await engine.execute(
+            spec: DataQuerySpec(
+                dataset: .sales,
+                operation: .aggregate,
+                time: QueryTimeSelection(datePT: "2026-02-18"),
+                filters: QueryFilterSet(sourceReport: ["summary-sales"])
+            ),
+            offline: true
+        )
+
+        let row = try XCTUnwrap(result.data.aggregates.first)
+        XCTAssertEqual(try XCTUnwrap(row.metrics["proceeds"]), 20, accuracy: 0.0001)
+        XCTAssertEqual(try XCTUnwrap(row.metrics["sales"]), 20, accuracy: 0.0001)
+        XCTAssertNil(row.metrics["proceedsRaw"])
+        XCTAssertNil(row.metrics["salesRaw"])
+        XCTAssertTrue(result.warnings.contains { $0.message.contains("USD") })
+    }
+
+    func testSalesAggregateNormalizesMixedCurrenciesToConfiguredCurrency() async throws {
+        let cacheStore = try makeCacheStore()
+        try recordReport(
+            cacheStore: cacheStore,
+            filename: "sales_mixed_2026-02-18.tsv",
+            source: .sales,
+            reportType: "SALES",
+            reportSubType: "SUMMARY",
+            reportDateKey: "2026-02-18",
+            text: """
+            Begin Date\tEnd Date\tTitle\tSKU\tParent Identifier\tProduct Type Identifier\tUnits\tDeveloper Proceeds\tCurrency of Proceeds\tCountry Code\tDevice\tApple Identifier\tVersion\tOrder Type\tProceeds Reason\tSupported Platforms\tCustomer Price\tCustomer Currency
+            2026-02-18\t2026-02-18\tHive App\thive.app\t\t1F\t1\t10\tUSD\tUS\tiPhone\t123\t1.0\t\t\tios\t10\tUSD
+            2026-02-18\t2026-02-18\tHive App\thive.app\t\t1F\t1\t1000\tJPY\tJP\tiPhone\t123\t1.0\t\t\tios\t1000\tJPY
+            """
+        )
+        try writeFXRates(
+            cacheStore: cacheStore,
+            json: """
+            {
+              "2026-02-18|USD|CNY": {
+                "requestDateKey": "2026-02-18",
+                "sourceDateKey": "2026-02-18",
+                "sourceCurrencyCode": "USD",
+                "targetCurrencyCode": "CNY",
+                "ratePerUnit": 7.2,
+                "fetchedAt": "2026-02-19T00:00:00Z"
+              },
+              "2026-02-18|JPY|CNY": {
+                "requestDateKey": "2026-02-18",
+                "sourceDateKey": "2026-02-18",
+                "sourceCurrencyCode": "JPY",
+                "targetCurrencyCode": "CNY",
+                "ratePerUnit": 0.072,
+                "fetchedAt": "2026-02-19T00:00:00Z"
+              }
+            }
+            """
+        )
+
+        let engine = AnalyticsEngine(cacheStore: cacheStore, reportingCurrency: "CNY")
+        let result = try await engine.execute(
+            spec: DataQuerySpec(
+                dataset: .sales,
+                operation: .aggregate,
+                time: QueryTimeSelection(datePT: "2026-02-18"),
+                filters: QueryFilterSet(sourceReport: ["summary-sales"])
+            ),
+            offline: true
+        )
+
+        let row = try XCTUnwrap(result.data.aggregates.first)
+        XCTAssertEqual(try XCTUnwrap(row.metrics["proceeds"]), 144, accuracy: 0.0001)
+        XCTAssertEqual(try XCTUnwrap(row.metrics["sales"]), 144, accuracy: 0.0001)
+        XCTAssertTrue(result.warnings.contains { $0.message.contains("CNY") })
     }
 
     private func makeCacheStore() throws -> CacheStore {
@@ -140,6 +270,53 @@ final class AnalyticsEngineTests: XCTestCase {
                 rawText: text
             )
         )
+    }
+
+    private func writeFXRates(cacheStore: CacheStore, json: String) throws {
+        try LocalFileSecurity.writePrivateData(Data(json.utf8), to: cacheStore.fxRatesURL)
+    }
+
+    private func writeFXRates(
+        cacheStore: CacheStore,
+        requests: Set<FXSeedRequest>,
+        targetCurrencyCode: String = "USD",
+        ratePerUnit: Double = 1
+    ) throws {
+        struct SeededFXRate: Codable {
+            var requestDateKey: String
+            var sourceDateKey: String
+            var sourceCurrencyCode: String
+            var targetCurrencyCode: String
+            var ratePerUnit: Double
+            var fetchedAt: Date
+        }
+
+        let normalizedTargetCurrency = targetCurrencyCode.normalizedCurrencyCode
+        let payload = Dictionary(uniqueKeysWithValues: requests.map { request in
+            let normalizedSourceCurrency = request.sourceCurrencyCode.normalizedCurrencyCode
+            let key = "\(request.dateKey)|\(normalizedSourceCurrency)|\(normalizedTargetCurrency)"
+            return (
+                key,
+                SeededFXRate(
+                    requestDateKey: request.dateKey,
+                    sourceDateKey: request.dateKey,
+                    sourceCurrencyCode: normalizedSourceCurrency,
+                    targetCurrencyCode: normalizedTargetCurrency,
+                    ratePerUnit: normalizedSourceCurrency == normalizedTargetCurrency ? 1 : ratePerUnit,
+                    fetchedAt: Date(timeIntervalSince1970: 0)
+                )
+            )
+        })
+
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        encoder.dateEncodingStrategy = .iso8601
+        try LocalFileSecurity.writePrivateData(try encoder.encode(payload), to: cacheStore.fxRatesURL)
+    }
+
+    private struct FXSeedRequest: Hashable {
+        var dateKey: String
+        var sourceCurrencyCode: String
     }
 
     private func makeReview(id: String, date: String, rating: Int, responded: Bool) throws -> ASCLatestReview {
