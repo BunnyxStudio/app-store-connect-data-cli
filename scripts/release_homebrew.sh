@@ -24,6 +24,8 @@ TAG="v${VERSION}"
 TARBALL_URL="https://github.com/BunnyxStudio/app-connect-data-cli/archive/refs/tags/${TAG}.tar.gz"
 REPO_FORMULA="${REPO_ROOT}/Formula/adc.rb"
 TAP_FORMULA="${TAP_PATH}/Formula/adc.rb"
+BREW_PREFIX="$(brew --prefix)"
+BREW_ADC="${BREW_PREFIX}/bin/adc"
 
 if [[ ! -f "${REPO_ROOT}/Package.swift" ]]; then
   echo "Repository root is invalid: ${REPO_ROOT}" >&2
@@ -99,7 +101,7 @@ PY
 
 HOMEBREW_NO_AUTO_UPDATE=1 brew reinstall BunnyxStudio/tap/adc
 brew test BunnyxStudio/tap/adc
-adc capabilities list --output json >/dev/null
+"${BREW_ADC}" capabilities list --output json >/dev/null
 
 echo "Updated formula to ${VERSION}"
 echo "Tarball: ${TARBALL_URL}"
