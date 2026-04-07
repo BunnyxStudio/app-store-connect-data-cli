@@ -49,7 +49,7 @@ public struct SalesReportQuery: Codable, Sendable, Equatable {
     public var reportType: String = "SALES"
     public var reportSubType: String = "SUMMARY"
     public var vendorNumber: String
-    public var version: String = "1_1"
+    public var version: String = "1_0"
     public var reportDate: String?
 
     public init(
@@ -57,7 +57,7 @@ public struct SalesReportQuery: Codable, Sendable, Equatable {
         reportType: String = "SALES",
         reportSubType: String = "SUMMARY",
         vendorNumber: String,
-        version: String = "1_1",
+        version: String = "1_0",
         reportDate: String? = nil
     ) {
         self.frequency = frequency

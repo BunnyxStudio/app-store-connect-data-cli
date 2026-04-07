@@ -4,6 +4,11 @@
 
 - No unreleased changes yet.
 
+## 0.1.2 - 2026-04-07
+
+- 修正 `SALES/SUMMARY/DAILY` 请求版本为 `1_0`
+- 避免部分账号在 `brief daily` / `overview daily` 上触发 `Invalid vendor number specified`
+
 ## 0.1.1 - 2026-04-07
 
 - 项目显示名更新为 `App Store Connect Data CLI`

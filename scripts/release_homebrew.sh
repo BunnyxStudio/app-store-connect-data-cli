@@ -7,8 +7,8 @@ usage() {
 Usage: scripts/release_homebrew.sh <version> [tap_path]
 
 Examples:
-  scripts/release_homebrew.sh 0.1.1
-  scripts/release_homebrew.sh 0.1.1 /opt/homebrew/Library/Taps/bunnyxstudio/homebrew-tap
+  scripts/release_homebrew.sh 0.1.2
+  scripts/release_homebrew.sh 0.1.2 /opt/homebrew/Library/Taps/bunnyxstudio/homebrew-tap
 EOF
 }
 
