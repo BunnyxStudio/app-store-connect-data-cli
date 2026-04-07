@@ -6,6 +6,8 @@
 
 It is built for operations, product, business analysis, and agent workflows that need structured Apple reporting data without a separate `sync` step.
 
+The command name is `adc`.
+
 ## What it does
 
 - Query Apple sales, finance, reviews, and analytics data directly by date, range, year, or fiscal month
@@ -76,39 +78,39 @@ Resolution order:
 ## Quick start
 
 ```bash
-./.build/release/app-connect-data-cli auth validate --output table
-./.build/release/app-connect-data-cli capabilities list --output table
-./.build/release/app-connect-data-cli sales records --range last-week --output json
-./.build/release/app-connect-data-cli reviews aggregate --range last-week --group-by territory --output table
-./.build/release/app-connect-data-cli brief weekly --output markdown
+./.build/release/adc auth validate --output table
+./.build/release/adc capabilities list --output table
+./.build/release/adc sales records --range last-week --output json
+./.build/release/adc reviews aggregate --range last-week --group-by territory --output table
+./.build/release/adc brief weekly --output markdown
 ```
 
 ## Command surface
 
 ```bash
-app-connect-data-cli auth validate
-app-connect-data-cli capabilities list
+adc auth validate
+adc capabilities list
 
-app-connect-data-cli sales records --range last-week
-app-connect-data-cli sales aggregate --range last-week --group-by territory
-app-connect-data-cli sales compare --range last-week --compare previous-period
+adc sales records --range last-week
+adc sales aggregate --range last-week --group-by territory
+adc sales compare --range last-week --compare previous-period
 
-app-connect-data-cli reviews records --range last-week
-app-connect-data-cli reviews aggregate --range last-week --group-by rating
-app-connect-data-cli reviews compare --range last-week --compare previous-period
+adc reviews records --range last-week
+adc reviews aggregate --range last-week --group-by rating
+adc reviews compare --range last-week --compare previous-period
 
-app-connect-data-cli finance records --fiscal-month 2026-02
-app-connect-data-cli finance aggregate --fiscal-month 2026-02 --group-by territory --group-by currency
-app-connect-data-cli finance compare --fiscal-month 2026-02 --compare month-over-month
+adc finance records --fiscal-month 2026-02
+adc finance aggregate --fiscal-month 2026-02 --group-by territory --group-by currency
+adc finance compare --fiscal-month 2026-02 --compare month-over-month
 
-app-connect-data-cli analytics records --range last-week --source-report usage
-app-connect-data-cli analytics aggregate --range last-week --source-report acquisition --group-by app
-app-connect-data-cli analytics compare --range last-week --source-report performance --compare previous-period
+adc analytics records --range last-week --source-report usage
+adc analytics aggregate --range last-week --source-report acquisition --group-by app
+adc analytics compare --range last-week --source-report performance --compare previous-period
 
-app-connect-data-cli brief weekly
-app-connect-data-cli brief monthly
-app-connect-data-cli query run --spec -
-app-connect-data-cli cache clear
+adc brief weekly
+adc brief monthly
+adc query run --spec -
+adc cache clear
 ```
 
 ## Time selection
@@ -149,13 +151,13 @@ There is no public `sync` command in the default workflow.
 The canonical machine interface is:
 
 ```bash
-app-connect-data-cli query run --spec <file|-> --output json
+adc query run --spec <file|-> --output json
 ```
 
 Example:
 
 ```bash
-cat examples/queries/sales-aggregate-last-week.json | ./.build/release/app-connect-data-cli query run --spec - --output json
+cat examples/queries/sales-aggregate-last-week.json | ./.build/release/adc query run --spec - --output json
 ```
 
 See [docs/query-spec.md](./docs/query-spec.md) and [docs/agent-guide.md](./docs/agent-guide.md).
@@ -178,7 +180,7 @@ Cached content includes:
 ```bash
 swift build
 swift test
-./.build/debug/app-connect-data-cli --help
+./.build/debug/adc --help
 ```
 
 ## Support

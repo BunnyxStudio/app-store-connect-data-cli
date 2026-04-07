@@ -1,6 +1,6 @@
 # Query Spec
 
-`app-connect-data-cli query run --spec <file|->` accepts a `DataQuerySpec` JSON payload.
+`adc query run --spec <file|->` accepts a `DataQuerySpec` JSON payload.
 
 ## Example
 

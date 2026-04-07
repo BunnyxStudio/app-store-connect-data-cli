@@ -247,7 +247,7 @@ private func makeSpec(
 @available(macOS 10.15, *)
 struct ACDCommand: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
-        commandName: "app-connect-data-cli",
+        commandName: "adc",
         abstract: "Direct App Store Connect data queries for official Apple reporting APIs.",
         subcommands: [Auth.self, Capabilities.self, Sales.self, Reviews.self, Finance.self, Analytics.self, Brief.self, Query.self, Cache.self]
     )

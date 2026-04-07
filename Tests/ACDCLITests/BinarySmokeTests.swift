@@ -95,7 +95,7 @@ final class BinarySmokeTests: XCTestCase {
     ) throws -> (status: Int32, output: String) {
         let process = Process()
         process.currentDirectoryURL = workingDirectory
-        process.executableURL = productsDirectory.appendingPathComponent("app-connect-data-cli")
+        process.executableURL = productsDirectory.appendingPathComponent("adc")
         process.arguments = arguments
 
         let output = Pipe()

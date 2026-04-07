@@ -10,7 +10,7 @@ let package = Package(
     products: [
         .library(name: "ACDCore", targets: ["ACDCore"]),
         .library(name: "ACDAnalytics", targets: ["ACDAnalytics"]),
-        .executable(name: "app-connect-data-cli", targets: ["ACDCLI"])
+        .executable(name: "adc", targets: ["ACDCLI"])
     ],
     dependencies: [
         .package(url: "https://github.com/apple/swift-argument-parser", from: "1.5.0")

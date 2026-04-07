@@ -3,7 +3,7 @@
 The stable agent interface is:
 
 ```bash
-app-connect-data-cli query run --spec <file|-> --output json
+adc query run --spec <file|-> --output json
 ```
 
 ## Recommended flow
