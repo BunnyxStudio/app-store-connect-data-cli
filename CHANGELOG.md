@@ -7,7 +7,8 @@
 ## 0.1.1 - 2026-04-07
 
 - 项目显示名更新为 `App Store Connect Data CLI`
-- 保留稳定标识 `adc`、仓库 slug `app-connect-data-cli` 和 `.app-connect-data-cli` 本地目录
+- 仓库 slug 更新为 `app-store-connect-data-cli`
+- 保留稳定标识 `adc` 和 `.app-connect-data-cli` 本地目录
 - 调整 README、CONTRIBUTING、NOTICE 和 Homebrew 文案
 - 修正 CONTRIBUTING 中的本地调试命令为 `./.build/debug/adc --help`
 

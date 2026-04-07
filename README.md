@@ -7,7 +7,7 @@
 It is built for operators, indie developers, product teams, and agents that need structured Apple reporting data without building a separate backend.
 
 The command name is `adc`.
-The GitHub repository slug stays `app-connect-data-cli`.
+The GitHub repository slug is `app-store-connect-data-cli`.
 
 ## What it does
 
@@ -72,8 +72,8 @@ The formula is published from the `homebrew-tap` repo and tracks the latest tagg
 ### Build from source
 
 ```bash
-git clone https://github.com/BunnyxStudio/app-connect-data-cli.git
-cd app-connect-data-cli
+git clone https://github.com/BunnyxStudio/app-store-connect-data-cli.git
+cd app-store-connect-data-cli
 swift build -c release
 mkdir -p ~/.local/bin
 install -m 755 ./.build/release/adc ~/.local/bin/adc
@@ -353,14 +353,14 @@ Run every Monday evening in my display time zone. Read this weekly brief JSON an
 Run after the local rollover shown by `adc config timezone show`:
 
 ```bash
-15 20 * * 1-5 cd /path/to/app-connect-data-cli && ./.build/release/adc overview daily --output markdown > reports/daily.md
+15 20 * * 1-5 cd /path/to/app-store-connect-data-cli && ./.build/release/adc overview daily --output markdown > reports/daily.md
 ```
 
 For weekly and monthly reports:
 
 ```bash
-30 20 * * 1 cd /path/to/app-connect-data-cli && ./.build/release/adc overview weekly --output markdown > reports/weekly.md
-45 20 1 * * cd /path/to/app-connect-data-cli && ./.build/release/adc brief last-month --output markdown > reports/last-month.md
+30 20 * * 1 cd /path/to/app-store-connect-data-cli && ./.build/release/adc overview weekly --output markdown > reports/weekly.md
+45 20 1 * * cd /path/to/app-store-connect-data-cli && ./.build/release/adc brief last-month --output markdown > reports/last-month.md
 ```
 
 ## Local cache
