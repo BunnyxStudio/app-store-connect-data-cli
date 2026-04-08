@@ -90,6 +90,76 @@ final class AnalyticsEngineTests: XCTestCase {
         XCTAssertEqual(try XCTUnwrap(row.metrics["averageRating"]?.previous), 4, accuracy: 0.0001)
     }
 
+    func testReviewsRecordsFiltersByRatingAndResponseState() async throws {
+        let cacheStore = try makeCacheStore()
+        try cacheStore.saveReviews(
+            CachedReviewsPayload(
+                fetchedAt: Date(),
+                reviews: [
+                    makeReview(id: "r1", date: "2026-02-18", rating: 5, responded: true),
+                    makeReview(id: "r2", date: "2026-02-18", rating: 5, responded: false),
+                    makeReview(id: "r3", date: "2026-02-18", rating: 3, responded: true)
+                ]
+            )
+        )
+        let engine = AnalyticsEngine(cacheStore: cacheStore)
+
+        let ratingOnly = try await engine.execute(
+            spec: DataQuerySpec(
+                dataset: .reviews,
+                operation: .records,
+                time: QueryTimeSelection(datePT: "2026-02-18"),
+                filters: QueryFilterSet(rating: [5])
+            ),
+            offline: true
+        )
+        XCTAssertEqual(ratingOnly.data.records.map(\.id).sorted(), ["r1", "r2"])
+
+        let respondedOnly = try await engine.execute(
+            spec: DataQuerySpec(
+                dataset: .reviews,
+                operation: .records,
+                time: QueryTimeSelection(datePT: "2026-02-18"),
+                filters: QueryFilterSet(responseState: "responded")
+            ),
+            offline: true
+        )
+        XCTAssertEqual(respondedOnly.data.records.map(\.id).sorted(), ["r1", "r3"])
+
+        let combined = try await engine.execute(
+            spec: DataQuerySpec(
+                dataset: .reviews,
+                operation: .records,
+                time: QueryTimeSelection(datePT: "2026-02-18"),
+                filters: QueryFilterSet(rating: [5], responseState: "responded")
+            ),
+            offline: true
+        )
+        XCTAssertEqual(combined.data.records.map(\.id), ["r1"])
+    }
+
+    func testReviewsRejectUnsupportedResponseStateFilter() async throws {
+        let cacheStore = try makeCacheStore()
+        let engine = AnalyticsEngine(cacheStore: cacheStore)
+
+        await XCTAssertThrowsErrorAsync(
+            try await engine.execute(
+                spec: DataQuerySpec(
+                    dataset: .reviews,
+                    operation: .records,
+                    time: QueryTimeSelection(datePT: "2026-02-18"),
+                    filters: QueryFilterSet(responseState: "pending")
+                ),
+                offline: true
+            )
+        ) { error in
+            XCTAssertEqual(
+                (error as? AnalyticsEngineError)?.errorDescription,
+                "Unsupported reviews response-state: pending. Supported values: responded, unresponded."
+            )
+        }
+    }
+
     func testFinanceAggregateFromFixture() async throws {
         let cacheStore = try makeCacheStore()
         let fixtureText = try fixture(named: "finance_detail_z1_2026-02.tsv")
@@ -239,6 +309,72 @@ final class AnalyticsEngineTests: XCTestCase {
             XCTAssertEqual(
                 (error as? AnalyticsEngineError)?.errorDescription,
                 "Unsupported analytics source-report: not-a-report. Supported values: acquisition, engagement, usage, performance."
+            )
+        }
+    }
+
+    func testSalesRejectsUnsupportedRatingFilter() async throws {
+        let cacheStore = try makeCacheStore()
+        let engine = AnalyticsEngine(cacheStore: cacheStore)
+
+        await XCTAssertThrowsErrorAsync(
+            try await engine.execute(
+                spec: DataQuerySpec(
+                    dataset: .sales,
+                    operation: .aggregate,
+                    time: QueryTimeSelection(datePT: "2026-02-18"),
+                    filters: QueryFilterSet(rating: [5])
+                ),
+                offline: true
+            )
+        ) { error in
+            XCTAssertEqual(
+                (error as? AnalyticsEngineError)?.errorDescription,
+                "Unsupported sales filter(s): rating. Supported filters: app, currency, device, sku, source-report, subscription, territory, version."
+            )
+        }
+    }
+
+    func testAggregateRejectsCompareOptions() async throws {
+        let cacheStore = try makeCacheStore()
+        let engine = AnalyticsEngine(cacheStore: cacheStore)
+
+        await XCTAssertThrowsErrorAsync(
+            try await engine.execute(
+                spec: DataQuerySpec(
+                    dataset: .sales,
+                    operation: .aggregate,
+                    time: QueryTimeSelection(datePT: "2026-02-18"),
+                    compare: .previousPeriod
+                ),
+                offline: true
+            )
+        ) { error in
+            XCTAssertEqual(
+                (error as? AnalyticsEngineError)?.errorDescription,
+                "compare and compareTime are only supported for compare operations."
+            )
+        }
+    }
+
+    func testCompareTimeRequiresCustomCompareMode() async throws {
+        let cacheStore = try makeCacheStore()
+        let engine = AnalyticsEngine(cacheStore: cacheStore)
+
+        await XCTAssertThrowsErrorAsync(
+            try await engine.execute(
+                spec: DataQuerySpec(
+                    dataset: .sales,
+                    operation: .compare,
+                    time: QueryTimeSelection(datePT: "2026-02-18"),
+                    compareTime: QueryTimeSelection(datePT: "2026-02-17")
+                ),
+                offline: true
+            )
+        ) { error in
+            XCTAssertEqual(
+                (error as? AnalyticsEngineError)?.errorDescription,
+                "compareTime requires compare=custom."
             )
         }
     }

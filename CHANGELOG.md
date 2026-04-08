@@ -4,6 +4,16 @@
 
 - No unreleased changes yet.
 
+## 0.1.7 - 2026-04-08
+
+- 新增 `adc --version` 输出，便于 Homebrew / issue 排查定位版本
+- `sales|reviews|finance|analytics aggregate` 不再接受 `--compare*` 参数，避免“参数可传但不生效”
+- 查询层新增过滤器能力校验：不支持的过滤器改为明确报错，不再静默忽略
+- 修复 `reviews` 的 `rating` / `response-state` 过滤器未生效问题
+- `query run` 新增 compare 参数约束：
+  - 仅 `operation=compare` 可使用 `compare` / `compareTime`
+  - `compareTime` 必须搭配 `compare=custom`
+
 ## 0.1.6 - 2026-04-08
 
 - 修复 `brief` / `overview` 的并发崩溃根因：将摘要查询从 `async let` 改为 `TaskGroup`，规避 Swift 运行时任务释放异常

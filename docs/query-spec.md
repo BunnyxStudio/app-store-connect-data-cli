@@ -11,7 +11,6 @@
   "time": {
     "rangePreset": "last-7d"
   },
-  "compare": "previous-period",
   "filters": {
     "territory": ["US", "CA"],
     "sourceReport": ["summary-sales"]
@@ -59,6 +58,8 @@ Supported presets:
 - `previous-month`
 
 ## Compare
+
+`compare` and `compareTime` are only valid when `operation` is `compare`.
 
 - `previous-period`
 - `week-over-week`

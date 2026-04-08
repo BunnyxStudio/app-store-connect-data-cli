@@ -139,6 +139,7 @@ public final class AnalyticsEngine: @unchecked Sendable {
         refresh: Bool = false,
         skipSync: Bool = false
     ) async throws -> QueryResult {
+        try validateSpec(spec)
         switch spec.dataset {
         case .sales:
             return try await executeSales(spec: spec, offline: offline, refresh: refresh, skipSync: skipSync)
@@ -184,9 +185,6 @@ public final class AnalyticsEngine: @unchecked Sendable {
         refresh: Bool,
         skipSync: Bool
     ) async throws -> QueryResult {
-        if spec.filters.version.isEmpty == false {
-            throw AnalyticsEngineError.unsupportedFilter("Reviews do not support version filtering because Apple does not expose review app versions.")
-        }
         try validateReviewSourceReports(spec.filters.sourceReport)
         if offline == false, skipSync == false, let syncService {
             let query = ASCCustomerReviewQuery(sort: .newest)
@@ -348,6 +346,87 @@ public final class AnalyticsEngine: @unchecked Sendable {
         case .brief:
             throw AnalyticsEngineError.invalidQuery("Brief summaries are handled by adc brief, adc overview, or adc query run --spec.")
         }
+    }
+
+    private func validateSpec(_ spec: DataQuerySpec) throws {
+        try validateCompareCompatibility(spec)
+        try validateFilterSupport(dataset: spec.dataset, filters: spec.filters)
+    }
+
+    private func validateCompareCompatibility(_ spec: DataQuerySpec) throws {
+        switch spec.operation {
+        case .compare:
+            if spec.compareTime != nil, spec.compare != .custom {
+                throw AnalyticsEngineError.invalidQuery("compareTime requires compare=custom.")
+            }
+        case .records, .aggregate:
+            if spec.compare != nil || spec.compareTime != nil {
+                throw AnalyticsEngineError.invalidQuery("compare and compareTime are only supported for compare operations.")
+            }
+        case .brief:
+            if spec.dataset != .brief {
+                throw AnalyticsEngineError.invalidQuery("brief operation is only supported for the brief dataset.")
+            }
+        }
+    }
+
+    private func validateFilterSupport(dataset: QueryDataset, filters: QueryFilterSet) throws {
+        let supported = supportedFilterSet(for: dataset)
+        let unsupported = requestedFilters(from: filters).filter { supported.contains($0) == false }
+        if unsupported.isEmpty == false {
+            let unsupportedList = unsupported.sorted().joined(separator: ", ")
+            let supportedList = supported.sorted().joined(separator: ", ")
+            throw AnalyticsEngineError.unsupportedFilter(
+                "Unsupported \(dataset.rawValue) filter(s): \(unsupportedList). Supported filters: \(supportedList)."
+            )
+        }
+
+        if dataset == .reviews {
+            let invalidRatings = Array(Set(filters.rating.filter { (1...5).contains($0) == false })).sorted()
+            if invalidRatings.isEmpty == false {
+                let invalidList = invalidRatings.map(String.init).joined(separator: ", ")
+                throw AnalyticsEngineError.unsupportedFilter(
+                    "Unsupported reviews rating filter: \(invalidList). Supported values: 1, 2, 3, 4, 5."
+                )
+            }
+            if let responseState = nonEmptyString(filters.responseState),
+               normalizedReviewResponseState(responseState) == nil {
+                throw AnalyticsEngineError.unsupportedFilter(
+                    "Unsupported reviews response-state: \(responseState). Supported values: responded, unresponded."
+                )
+            }
+        }
+    }
+
+    private func supportedFilterSet(for dataset: QueryDataset) -> Set<String> {
+        switch dataset {
+        case .sales:
+            return ["app", "version", "territory", "currency", "device", "sku", "subscription", "source-report"]
+        case .reviews:
+            return ["app", "territory", "rating", "response-state", "source-report"]
+        case .finance:
+            return ["app", "territory", "currency", "sku", "source-report"]
+        case .analytics:
+            return ["app", "version", "territory", "device", "platform", "source-report"]
+        case .brief:
+            return []
+        }
+    }
+
+    private func requestedFilters(from filters: QueryFilterSet) -> Set<String> {
+        var names: Set<String> = []
+        if filters.app.isEmpty == false { names.insert("app") }
+        if filters.version.isEmpty == false { names.insert("version") }
+        if filters.territory.isEmpty == false { names.insert("territory") }
+        if filters.currency.isEmpty == false { names.insert("currency") }
+        if filters.device.isEmpty == false { names.insert("device") }
+        if filters.sku.isEmpty == false { names.insert("sku") }
+        if filters.subscription.isEmpty == false { names.insert("subscription") }
+        if filters.platform.isEmpty == false { names.insert("platform") }
+        if filters.sourceReport.isEmpty == false { names.insert("source-report") }
+        if filters.rating.isEmpty == false { names.insert("rating") }
+        if nonEmptyString(filters.responseState) != nil { names.insert("response-state") }
+        return names
     }
 
     private func loadRecordsForComparison(
@@ -712,12 +791,18 @@ public final class AnalyticsEngine: @unchecked Sendable {
 
     private func loadReviewRecords(window: PTDateWindow, filters: QueryFilterSet) throws -> [QueryRecord] {
         guard let payload = try cacheStore.loadReviews() else { return [] }
+        let allowedRatings = Set(filters.rating)
+        let expectedResponseState = normalizedReviewResponseState(filters.responseState)
         return payload.reviews.compactMap { review in
             let reviewDay = Calendar.pacific.startOfDay(for: review.createdDate)
             guard window.startDate <= reviewDay, reviewDay <= window.endDate else { return nil }
             guard filters.app.isEmpty || matchesAny(review.appName, in: filters.app) || matchesAny(review.appID, in: filters.app) else { return nil }
             guard filters.territory.isEmpty || matchesAny(review.territory ?? "", in: filters.territory) else { return nil }
+            guard allowedRatings.isEmpty || allowedRatings.contains(review.rating) else { return nil }
             let responseState = review.developerResponse == nil ? "unresponded" : "responded"
+            if let expectedResponseState, responseState != expectedResponseState {
+                return nil
+            }
             return QueryRecord(
                 id: review.id,
                 dimensions: [
@@ -1499,6 +1584,24 @@ public final class AnalyticsEngine: @unchecked Sendable {
             .lowercased()
             .replacingOccurrences(of: "_", with: "-")
             .replacingOccurrences(of: " ", with: "-")
+    }
+
+    private func normalizedReviewResponseState(_ value: String?) -> String? {
+        guard let state = nonEmptyString(value) else { return nil }
+        switch normalizeReportName(state) {
+        case "responded":
+            return "responded"
+        case "unresponded":
+            return "unresponded"
+        default:
+            return nil
+        }
+    }
+
+    private func nonEmptyString(_ value: String?) -> String? {
+        guard let value else { return nil }
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
     }
 
     private func normalizeHeader(_ value: String) -> String {

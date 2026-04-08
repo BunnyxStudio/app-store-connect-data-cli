@@ -223,6 +223,8 @@ Run after the local rollover shown by `adc config timezone show`:
 Most-used commands:
 
 ```bash
+adc --version
+
 adc auth validate
 
 adc overview daily

@@ -290,6 +290,8 @@ private func executeBriefSummary(
     try OutputRenderer.write(report, format: output)
 }
 
+private let adcVersion = "0.1.7"
+
 @main
 @available(macOS 10.15, *)
 struct ACDCommand: AsyncParsableCommand {
@@ -303,6 +305,7 @@ struct ACDCommand: AsyncParsableCommand {
           adc sales aggregate --range last-7d --group-by territory
           adc query run --spec -
         """,
+        version: adcVersion,
         subcommands: [Auth.self, Config.self, Capabilities.self, Overview.self, Sales.self, Reviews.self, Finance.self, Analytics.self, Brief.self, Query.self, Cache.self]
     )
 }
@@ -610,13 +613,12 @@ extension ACDCommand.Sales {
         @OptionGroup var credentials: CredentialsOptions
         @OptionGroup var time: TimeSelectionOptions
         @OptionGroup var filters: FilterOptions
-        @OptionGroup var compare: CompareOptions
         @Option(name: .customLong("group-by"), help: "Group by field. Repeat for multiple values.")
         var groupBy: [QueryGroupBy] = []
         @OptionGroup var fetch: FetchControlOptions
 
         mutating func run() async throws {
-            try await executeDataset(operation: .aggregate, global: global, credentials: credentials, time: time, filters: filters, compare: compare, groupBy: groupBy, fetch: fetch)
+            try await executeDataset(operation: .aggregate, global: global, credentials: credentials, time: time, filters: filters, compare: nil, groupBy: groupBy, fetch: fetch)
         }
     }
 
@@ -660,13 +662,12 @@ extension ACDCommand.Reviews {
         @OptionGroup var credentials: CredentialsOptions
         @OptionGroup var time: TimeSelectionOptions
         @OptionGroup var filters: FilterOptions
-        @OptionGroup var compare: CompareOptions
         @Option(name: .customLong("group-by"), help: "Group by field. Repeat for multiple values.")
         var groupBy: [QueryGroupBy] = []
         @OptionGroup var fetch: FetchControlOptions
 
         mutating func run() async throws {
-            try await executeDataset(operation: .aggregate, global: global, credentials: credentials, time: time, filters: filters, compare: compare, groupBy: groupBy, fetch: fetch)
+            try await executeDataset(operation: .aggregate, global: global, credentials: credentials, time: time, filters: filters, compare: nil, groupBy: groupBy, fetch: fetch)
         }
     }
 
@@ -710,13 +711,12 @@ extension ACDCommand.Finance {
         @OptionGroup var credentials: CredentialsOptions
         @OptionGroup var time: TimeSelectionOptions
         @OptionGroup var filters: FilterOptions
-        @OptionGroup var compare: CompareOptions
         @Option(name: .customLong("group-by"), help: "Group by field. Repeat for multiple values.")
         var groupBy: [QueryGroupBy] = []
         @OptionGroup var fetch: FetchControlOptions
 
         mutating func run() async throws {
-            try await executeDataset(operation: .aggregate, global: global, credentials: credentials, time: time, filters: filters, compare: compare, groupBy: groupBy, fetch: fetch)
+            try await executeDataset(operation: .aggregate, global: global, credentials: credentials, time: time, filters: filters, compare: nil, groupBy: groupBy, fetch: fetch)
         }
     }
 
@@ -760,13 +760,12 @@ extension ACDCommand.Analytics {
         @OptionGroup var credentials: CredentialsOptions
         @OptionGroup var time: TimeSelectionOptions
         @OptionGroup var filters: FilterOptions
-        @OptionGroup var compare: CompareOptions
         @Option(name: .customLong("group-by"), help: "Group by field. Repeat for multiple values.")
         var groupBy: [QueryGroupBy] = []
         @OptionGroup var fetch: FetchControlOptions
 
         mutating func run() async throws {
-            try await executeDataset(operation: .aggregate, global: global, credentials: credentials, time: time, filters: filters, compare: compare, groupBy: groupBy, fetch: fetch)
+            try await executeDataset(operation: .aggregate, global: global, credentials: credentials, time: time, filters: filters, compare: nil, groupBy: groupBy, fetch: fetch)
         }
     }
 

@@ -18,6 +18,17 @@ import Foundation
 @testable import ACDCore
 
 final class BinarySmokeTests: XCTestCase {
+    func testVersionFlagPrintsVersion() throws {
+        let workingDirectory = try makeTempDirectory()
+        let result = try runProcess(
+            arguments: ["--version"],
+            workingDirectory: workingDirectory
+        )
+
+        XCTAssertEqual(result.status, 0, result.output)
+        XCTAssertTrue(result.output.contains("0.1.7"), result.output)
+    }
+
     func testCapabilitiesListRunsWithoutCredentials() throws {
         let workingDirectory = try makeTempDirectory()
         let result = try runProcess(
@@ -202,6 +213,30 @@ final class BinarySmokeTests: XCTestCase {
         XCTAssertNotEqual(result.status, 0, result.output)
         XCTAssertTrue(result.output.contains("Unsupported sales source-report"))
         XCTAssertTrue(result.output.contains("summary-sales"))
+    }
+
+    func testSalesAggregateDoesNotAcceptCompareOptions() throws {
+        let workingDirectory = try makeTempDirectory()
+
+        let result = try runProcess(
+            arguments: ["sales", "aggregate", "--range", "last-7d", "--compare", "previous-period", "--output", "json"],
+            workingDirectory: workingDirectory
+        )
+
+        XCTAssertNotEqual(result.status, 0, result.output)
+        XCTAssertTrue(result.output.contains("Unknown option '--compare'"), result.output)
+    }
+
+    func testSalesAggregateRejectsUnsupportedRatingFilter() throws {
+        let workingDirectory = try makeTempDirectory()
+
+        let result = try runProcess(
+            arguments: ["sales", "aggregate", "--range", "last-7d", "--group-by", "territory", "--rating", "5", "--output", "json"],
+            workingDirectory: workingDirectory
+        )
+
+        XCTAssertNotEqual(result.status, 0, result.output)
+        XCTAssertTrue(result.output.contains("Unsupported sales filter(s): rating"), result.output)
     }
 
     private func seedSubscriptionCache(in workingDirectory: URL) throws {
