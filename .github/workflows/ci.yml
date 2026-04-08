@@ -17,5 +17,7 @@ jobs:
         run: ./scripts/check_version_consistency.sh
       - name: Build
         run: swift build
+      - name: Check example specs
+        run: ./scripts/check_example_specs.sh
       - name: Test
         run: swift test

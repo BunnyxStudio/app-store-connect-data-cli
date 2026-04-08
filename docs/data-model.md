@@ -7,7 +7,7 @@ Most public query commands share one request model.
 ```json
 {
   "dataset": "sales",
-  "operation": "aggregate",
+  "operation": "compare",
   "time": {
     "rangePreset": "last-7d"
   },
@@ -32,6 +32,8 @@ Most public query commands share one request model.
 - `filters`
 - `groupBy`
 - `limit`
+
+`compare` and `compareTime` are valid only when `operation` is `compare`.
 
 ## Shared response model
 

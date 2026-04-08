@@ -290,7 +290,7 @@ private func executeBriefSummary(
     try OutputRenderer.write(report, format: output)
 }
 
-private let adcVersion = "0.1.7"
+private let adcVersion = "0.1.8"
 
 @main
 @available(macOS 10.15, *)

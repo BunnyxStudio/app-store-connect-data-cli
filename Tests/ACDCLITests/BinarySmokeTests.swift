@@ -26,7 +26,7 @@ final class BinarySmokeTests: XCTestCase {
         )
 
         XCTAssertEqual(result.status, 0, result.output)
-        XCTAssertTrue(result.output.contains("0.1.7"), result.output)
+        XCTAssertTrue(result.output.contains("0.1.8"), result.output)
     }
 
     func testCapabilitiesListRunsWithoutCredentials() throws {

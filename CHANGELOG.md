@@ -2,10 +2,15 @@
 
 ## Unreleased
 
+## 0.1.8 - 2026-04-08
+
 - Added explicit platform requirements in `README.md`.
 - Clarified that `scripts/full_cli_smoke.sh` requires real credentials and network access.
 - Added `scripts/check_version_consistency.sh` and wired it into CI.
 - Standardized community-facing docs to English (`SUPPORT.md`, `CODE_OF_CONDUCT.md`).
+- Fixed `examples/queries/sales-aggregate-last-week.json` to remove invalid `compare` usage under `operation=aggregate`.
+- Fixed `docs/data-model.md` request example to use `operation=compare` when including `compare` fields.
+- Added `scripts/check_example_specs.sh` and wired it into CI to verify all example specs are executable offline.
 
 ## 0.1.7 - 2026-04-08
 
