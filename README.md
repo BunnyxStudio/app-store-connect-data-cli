@@ -174,12 +174,20 @@ adc config timezone set America/Los_Angeles --local
 
 ### Daily health check
 
+Who this is for: indie developers and PMs who check trend shifts every day.
+
+When to run: after Apple daily rollover, before your first work block.
+
 ```bash
 adc overview daily
 adc sales aggregate --range last-7d --group-by territory --output table
 ```
 
 ### Weekly ops review
+
+Who this is for: ops owners preparing weekly KPI review.
+
+When to run: before Monday or weekly team meeting.
 
 ```bash
 adc overview weekly --output markdown
@@ -189,12 +197,18 @@ adc analytics aggregate --range last-7d --source-report usage --group-by app --o
 
 ### Previous month finance review
 
+Who this is for: founders or finance owners closing monthly numbers.
+
+When to run: after month-close when Apple finance data is ready.
+
 ```bash
 adc brief last-month --output markdown
 adc finance aggregate --fiscal-month 2026-03 --group-by territory --group-by currency --output table
 ```
 
 ### Local cron scheduling
+
+Who this is for: users who want unattended local report generation.
 
 Run after the local rollover shown by `adc config timezone show`:
 
