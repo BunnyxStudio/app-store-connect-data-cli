@@ -73,10 +73,9 @@ jobs:
           text = path.read_text()
 
           text, url_count = re.subn(r'^  url ".*"$', f'  url "{url}"', text, count=1, flags=re.MULTILINE)
-          text, version_count = re.subn(r'^  version ".*"$', f'  version "{version}"', text, count=1, flags=re.MULTILINE)
           text, sha_count = re.subn(r'^  sha256 ".*"$', f'  sha256 "{sha256}"', text, count=1, flags=re.MULTILINE)
 
-          if url_count != 1 or version_count != 1 or sha_count != 1:
+          if url_count != 1 or sha_count != 1:
               raise SystemExit("Failed to update tap formula")
 
           path.write_text(text)

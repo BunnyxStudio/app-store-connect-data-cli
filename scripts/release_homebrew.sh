@@ -59,12 +59,12 @@ ARCHIVE_PATH="${TMP_DIR}/source.tar.gz"
 curl -fsSL "${TARBALL_URL}" -o "${ARCHIVE_PATH}"
 SHA256="$(shasum -a 256 "${ARCHIVE_PATH}" | awk '{print $1}')"
 
-python3 - "${VERSION}" "${SHA256}" "${TARBALL_URL}" "${REPO_FORMULA}" "${TAP_FORMULA}" <<'PY'
+python3 - "${SHA256}" "${TARBALL_URL}" "${REPO_FORMULA}" "${TAP_FORMULA}" <<'PY'
 import re
 import sys
 from pathlib import Path
 
-version, sha256, url, *paths = sys.argv[1:]
+sha256, url, *paths = sys.argv[1:]
 
 for raw_path in paths:
     path = Path(raw_path)
@@ -77,13 +77,6 @@ for raw_path in paths:
         count=1,
         flags=re.MULTILINE,
     )
-    text, version_count = re.subn(
-        r'^  version ".*"$',
-        f'  version "{version}"',
-        text,
-        count=1,
-        flags=re.MULTILINE,
-    )
     text, sha_count = re.subn(
         r'^  sha256 ".*"$',
         f'  sha256 "{sha256}"',
@@ -92,7 +85,7 @@ for raw_path in paths:
         flags=re.MULTILINE,
     )
 
-    if url_count != 1 or version_count != 1 or sha_count != 1:
+    if url_count != 1 or sha_count != 1:
         raise SystemExit(f"Formula update failed: {path}")
 
     path.write_text(text)

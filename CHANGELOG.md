@@ -8,6 +8,7 @@
 
 - 修复 `brief` / `overview` 在部分环境下出现 `freed pointer was not the last allocation` 崩溃
 - 将摘要构建阶段改为稳定优先执行路径，避免高并发查询触发运行时内存错误
+- 修复 Homebrew tap audit：移除冗余 `version` 字段，恢复自动 bottle 流程
 
 ## 0.1.4 - 2026-04-08
 
