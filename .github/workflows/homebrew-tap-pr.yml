@@ -1,0 +1,114 @@
+name: Homebrew Tap PR
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version, e.g. 0.1.4 or v0.1.4"
+        required: true
+        type: string
+
+jobs:
+  open-tap-pr:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.HOMEBREW_TAP_GH_TOKEN }}
+    steps:
+      - name: Require tap token
+        run: |
+          if [ -z "${GH_TOKEN}" ]; then
+            echo "Missing secret HOMEBREW_TAP_GH_TOKEN" >&2
+            exit 1
+          fi
+
+      - name: Resolve release version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "release" ]; then
+            RAW="${{ github.event.release.tag_name }}"
+          else
+            RAW="${{ github.event.inputs.version }}"
+          fi
+
+          VERSION="${RAW#v}"
+          if ! echo "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "Invalid version: $RAW" >&2
+            exit 1
+          fi
+
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Compute source tarball sha256
+        id: tarball
+        run: |
+          TAG="${{ steps.version.outputs.tag }}"
+          URL="https://github.com/BunnyxStudio/app-store-connect-data-cli/archive/refs/tags/${TAG}.tar.gz"
+          curl -fsSL "$URL" -o source.tar.gz
+          SHA256="$(sha256sum source.tar.gz | awk '{print $1}')"
+          echo "url=$URL" >> "$GITHUB_OUTPUT"
+          echo "sha256=$SHA256" >> "$GITHUB_OUTPUT"
+
+      - name: Clone tap repository
+        run: gh repo clone BunnyxStudio/homebrew-tap tap
+
+      - name: Update tap formula
+        run: |
+          python3 - <<'PY'
+          import re
+          from pathlib import Path
+          import os
+
+          version = os.environ["VERSION"]
+          url = os.environ["URL"]
+          sha256 = os.environ["SHA256"]
+          path = Path("tap/Formula/adc.rb")
+          text = path.read_text()
+
+          text, url_count = re.subn(r'^  url ".*"$', f'  url "{url}"', text, count=1, flags=re.MULTILINE)
+          text, version_count = re.subn(r'^  version ".*"$', f'  version "{version}"', text, count=1, flags=re.MULTILINE)
+          text, sha_count = re.subn(r'^  sha256 ".*"$', f'  sha256 "{sha256}"', text, count=1, flags=re.MULTILINE)
+
+          if url_count != 1 or version_count != 1 or sha_count != 1:
+              raise SystemExit("Failed to update tap formula")
+
+          path.write_text(text)
+          PY
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          URL: ${{ steps.tarball.outputs.url }}
+          SHA256: ${{ steps.tarball.outputs.sha256 }}
+
+      - name: Create or update tap PR
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          BRANCH="release/adc-v${VERSION}"
+
+          cd tap
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -B "$BRANCH"
+
+          if git diff --quiet -- Formula/adc.rb; then
+            echo "No formula changes to publish."
+            exit 0
+          fi
+
+          git add Formula/adc.rb
+          git commit -m "adc ${VERSION}"
+          git push -u origin "$BRANCH" --force
+
+          EXISTING_PR="$(gh pr list --repo BunnyxStudio/homebrew-tap --head "$BRANCH" --json number --jq '.[0].number // empty')"
+          if [ -n "$EXISTING_PR" ]; then
+            echo "PR already exists: #$EXISTING_PR"
+            exit 0
+          fi
+
+          gh pr create \
+            --repo BunnyxStudio/homebrew-tap \
+            --head "$BRANCH" \
+            --base main \
+            --title "adc ${VERSION}" \
+            --body "Automated formula bump for adc ${VERSION}.\n\nOnce CI passes, this PR will be auto-labeled for brew pr-pull."

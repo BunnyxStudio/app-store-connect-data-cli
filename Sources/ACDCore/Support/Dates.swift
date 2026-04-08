@@ -47,21 +47,34 @@ public extension Calendar {
 }
 
 extension DateFormatter {
-    public static let ptDateFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.timeZone = pacificTimeZone
-        formatter.dateFormat = "yyyy-MM-dd"
-        return formatter
-    }()
+    public static var ptDateFormatter: DateFormatter {
+        ThreadLocalDateFormatterCache.formatter(
+            key: "com.bunnyxstudio.acdcore.dateformatter.ptdate",
+            dateFormat: "yyyy-MM-dd"
+        )
+    }
 
-    public static let fiscalMonthFormatter: DateFormatter = {
+    public static var fiscalMonthFormatter: DateFormatter {
+        ThreadLocalDateFormatterCache.formatter(
+            key: "com.bunnyxstudio.acdcore.dateformatter.fiscalmonth",
+            dateFormat: "yyyy-MM"
+        )
+    }
+}
+
+private enum ThreadLocalDateFormatterCache {
+    static func formatter(key: String, dateFormat: String) -> DateFormatter {
+        let dictionary = Thread.current.threadDictionary
+        if let existing = dictionary[key] as? DateFormatter {
+            return existing
+        }
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.timeZone = pacificTimeZone
-        formatter.dateFormat = "yyyy-MM"
+        formatter.dateFormat = dateFormat
+        dictionary[key] = formatter
         return formatter
-    }()
+    }
 }
 
 public enum PTDateWindowError: LocalizedError, Equatable, Sendable {

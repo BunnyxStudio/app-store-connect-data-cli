@@ -4,6 +4,13 @@
 
 - No unreleased changes yet.
 
+## 0.1.4 - 2026-04-08
+
+- 修复并发场景下 `DateFormatter` 非线程安全导致的 `brief` / `overview` 进程崩溃风险
+- 为维护者新增 Homebrew 自动发布链路：
+  - 本仓库发版后自动创建 `homebrew-tap` 升级 PR
+  - tap 仓库在 `brew test-bot` 通过后自动标记 `pr-pull`
+
 ## 0.1.3 - 2026-04-08
 
 - 校验 `source-report` 输入并补齐 report-not-ready 警告透传

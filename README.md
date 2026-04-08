@@ -69,6 +69,14 @@ brew install BunnyxStudio/tap/adc
 
 The formula is published from the `homebrew-tap` repo and tracks the latest tagged release.
 
+### Homebrew Bottle Automation (Maintainers)
+
+- This repo opens a tap PR automatically after a GitHub Release is published:
+  - `.github/workflows/homebrew-tap-pr.yml`
+- Required secret in this repo:
+  - `HOMEBREW_TAP_GH_TOKEN` (must be allowed to push branches and open PRs on `BunnyxStudio/homebrew-tap`)
+- The tap repo then runs `brew test-bot`, auto-labels successful PRs with `pr-pull`, and publishes bottles through `brew pr-pull`.
+
 ### Build from source
 
 ```bash

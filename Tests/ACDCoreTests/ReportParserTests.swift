@@ -50,6 +50,29 @@ final class ReportParserTests: XCTestCase {
         XCTAssertEqual(rows.first?.countryOfSale, "AU")
     }
 
+    func testSubscriptionParsingIsStableUnderConcurrentAccess() async throws {
+        let tsv = try fixture(named: "subscription_2026-02-18.tsv")
+        let fallback = DateFormatter.ptDateFormatter.date(from: "2026-02-18")
+        let parser = parser
+
+        let counts = try await withThrowingTaskGroup(of: Int.self) { group in
+            for _ in 0..<200 {
+                group.addTask {
+                    try parser.parseSubscription(tsv: tsv, fallbackDatePT: fallback).count
+                }
+            }
+
+            var result: [Int] = []
+            for try await count in group {
+                result.append(count)
+            }
+            return result
+        }
+
+        XCTAssertEqual(counts.count, 200)
+        XCTAssertTrue(counts.allSatisfy { $0 > 0 })
+    }
+
     private func fixture(named name: String) throws -> String {
         let path = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()

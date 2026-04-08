@@ -134,49 +134,44 @@ public enum ReportParserError: Error {
     case malformed
 }
 
-public nonisolated struct ReportParser {
+public struct ReportParser: Sendable {
     private let minBusinessYear = 2015
     private let maxBusinessYear = 2100
 
-    private let dateFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.timeZone = TimeZone(identifier: "America/Los_Angeles") ?? .current
-        formatter.dateFormat = "yyyy-MM-dd"
-        return formatter
-    }()
+    private var dateFormatter: DateFormatter {
+        formatter(
+            key: "com.bunnyxstudio.acdcore.reportparser.dateformatter.dashed",
+            dateFormat: "yyyy-MM-dd"
+        )
+    }
 
-    private let slashDateFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.timeZone = TimeZone(identifier: "America/Los_Angeles") ?? .current
-        formatter.dateFormat = "MM/dd/yyyy"
-        return formatter
-    }()
+    private var slashDateFormatter: DateFormatter {
+        formatter(
+            key: "com.bunnyxstudio.acdcore.reportparser.dateformatter.slash",
+            dateFormat: "MM/dd/yyyy"
+        )
+    }
 
-    private let shortSlashDateFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.timeZone = TimeZone(identifier: "America/Los_Angeles") ?? .current
-        formatter.dateFormat = "M/d/yyyy"
-        return formatter
-    }()
+    private var shortSlashDateFormatter: DateFormatter {
+        formatter(
+            key: "com.bunnyxstudio.acdcore.reportparser.dateformatter.shortslash",
+            dateFormat: "M/d/yyyy"
+        )
+    }
 
-    private let shortSlashYear2DateFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.timeZone = TimeZone(identifier: "America/Los_Angeles") ?? .current
-        formatter.dateFormat = "M/d/yy"
-        return formatter
-    }()
+    private var shortSlashYear2DateFormatter: DateFormatter {
+        formatter(
+            key: "com.bunnyxstudio.acdcore.reportparser.dateformatter.shortslashyear2",
+            dateFormat: "M/d/yy"
+        )
+    }
 
-    private let compactDateFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.timeZone = TimeZone(identifier: "America/Los_Angeles") ?? .current
-        formatter.dateFormat = "yyyyMMdd"
-        return formatter
-    }()
+    private var compactDateFormatter: DateFormatter {
+        formatter(
+            key: "com.bunnyxstudio.acdcore.reportparser.dateformatter.compact",
+            dateFormat: "yyyyMMdd"
+        )
+    }
 
     public init() {}
 
@@ -904,6 +899,19 @@ public nonisolated struct ReportParser {
             return units > 0 ? partnerShare * units : partnerShare
         }
         return 0
+    }
+
+    private func formatter(key: String, dateFormat: String) -> DateFormatter {
+        let dictionary = Thread.current.threadDictionary
+        if let existing = dictionary[key] as? DateFormatter {
+            return existing
+        }
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = pacificTimeZone
+        formatter.dateFormat = dateFormat
+        dictionary[key] = formatter
+        return formatter
     }
 
     private func applySalesDirection(_ value: Double, salesOrReturn: String) -> Double {
