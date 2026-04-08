@@ -4,6 +4,11 @@
 
 - No unreleased changes yet.
 
+## 0.1.6 - 2026-04-08
+
+- 修复 `brief` / `overview` 的并发崩溃根因：将摘要查询从 `async let` 改为 `TaskGroup`，规避 Swift 运行时任务释放异常
+- `brief` / `overview` 预热改为“先确保 `summary-sales` 成功，再尽力拉取订阅类报表”，订阅不可用时自动降级而不影响主体摘要
+
 ## 0.1.5 - 2026-04-08
 
 - 修复 `brief` / `overview` 在部分环境下出现 `freed pointer was not the last allocation` 崩溃
