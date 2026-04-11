@@ -84,6 +84,20 @@ for raw_path in paths:
         count=1,
         flags=re.MULTILINE,
     )
+    text, _ = re.subn(
+        r'^  revision \d+\n',
+        '',
+        text,
+        count=1,
+        flags=re.MULTILINE,
+    )
+    text, _ = re.subn(
+        r'\n  bottle do\n(?:.*\n)*?  end\n',
+        '\n',
+        text,
+        count=1,
+        flags=re.MULTILINE,
+    )
 
     if url_count != 1 or sha_count != 1:
         raise SystemExit(f"Formula update failed: {path}")
